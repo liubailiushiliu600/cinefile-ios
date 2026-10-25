@@ -157,8 +157,9 @@ extension VLCPlayer: VLCMediaPlayerDelegate {
     func mediaPlayerTimeChanged(_ aNotification: Notification) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            let time = Double(self.player.time.intValue) / 1000.0
-            let length = Double(self.player.length.intValue) / 1000.0
+            let time = Double(self.player.time?.intValue ?? 0) / 1000.0
+            let lengthTime: VLCTime? = self.player.media?.length
+            let length = Double(lengthTime?.intValue ?? 0) / 1000.0
             if length > 0 {
                 self.duration = length
             }
