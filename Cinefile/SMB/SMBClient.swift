@@ -13,58 +13,61 @@ struct SMBEntry: Identifiable, Hashable, Sendable {
 
 /// SMB client for browsing a paired peer's share (AMSMB2 / libsmb2).
 /// Playback itself is handed to VLC, which ships its own libsmb2 plugin.
-final class SMBClient {
+final class SMBClient: @unchecked Sendable {
     let access: SMBAccess
     private let manager: SMB2Manager
 
     init?(access: SMBAccess) {
         guard let url = URL(string: "smb://\(access.server)") else { return nil }
-        guard let manager = SMB2Manager(url: url, user: access.username, password: access.password) else {
-            return nil
-        }
+        let credential = URLCredential(
+            user: access.username,
+            password: access.password,
+            persistence: .forSession
+        )
+        guard let manager = SMB2Manager(url: url, credential: credential) else { return nil }
         self.access = access
         self.manager = manager
     }
 
+    /// Connect and mount the share; paths afterwards are relative to its root.
     func connect() async throws {
-        try await manager.connect()
+        try await manager.connectShare(name: access.share)
     }
 
     func disconnect() async {
-        await manager.disconnect()
+        try? await manager.disconnectShare()
     }
 
     /// List a path relative to the share root ("" = share root).
     func list(_ relativePath: String) async throws -> [SMBEntry] {
-        let full = fullPath(relativePath)
-        let items = try await manager.contentsOfDirectory(atPath: full)
+        let trimmed = relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let path = trimmed.isEmpty ? "/" : "/\(trimmed)"
+        let items = try await manager.contentsOfDirectory(atPath: path)
+
         var entries: [SMBEntry] = []
         for item in items {
-            let name = item.name
+            guard let name = item[.nameKey] as? String else { continue }
             if name.hasPrefix(".") || name == "$RECYCLE.BIN" || name == "System Volume Information" {
                 continue
             }
+            let resourceType = item[.fileResourceTypeKey] as? URLFileResourceType
+            let isDirectory = resourceType == .directory
+            let size = (item[.fileSizeKey] as? NSNumber)?.int64Value ?? 0
             entries.append(
                 SMBEntry(
                     name: name,
-                    path: relativePath.isEmpty ? name : "\(relativePath)/\(name)",
-                    isDirectory: item.isDirectory,
-                    size: Int64(item.size)
+                    path: trimmed.isEmpty ? name : "\(trimmed)/\(name)",
+                    isDirectory: isDirectory,
+                    size: size
                 )
             )
         }
+
         entries.sort { lhs, rhs in
             if lhs.isDirectory != rhs.isDirectory { return lhs.isDirectory }
             return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
         return entries
-    }
-
-    func fullPath(_ relativePath: String) -> String {
-        let share = access.share.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let rest = relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if rest.isEmpty { return "/\(share)" }
-        return "/\(share)/\(rest)"
     }
 }
 
