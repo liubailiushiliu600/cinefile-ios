@@ -1,5 +1,10 @@
 # XcodeGen output
 Cinefile.xcodeproj/
+Cinefile.xcworkspace/
+
+# CocoaPods
+Pods/
+Podfile.lock
 
 # Build products
 build/

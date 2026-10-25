@@ -56,6 +56,10 @@ struct RootView: View {
                 .environmentObject(app)
                 .preferredColorScheme(.dark)
         }
+        .fullScreenCover(item: $app.playingEntry) { entry in
+            PlayerScreen(entry: entry)
+                .preferredColorScheme(.dark)
+        }
     }
 
     @ViewBuilder

@@ -8,14 +8,14 @@ on:
 jobs:
   build:
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install tools
-        run: brew install xcodegen ldid
+        run: brew install xcodegen ldid cocoapods
 
       - name: Show Xcode version
         run: xcodebuild -version
@@ -23,11 +23,14 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Install pods (MobileVLCKit)
+        run: pod install --repo-update
+
       - name: Build (unsigned archive)
         run: |
           set -o pipefail
           xcodebuild archive \
-            -project Cinefile.xcodeproj \
+            -workspace Cinefile.xcworkspace \
             -scheme Cinefile \
             -configuration Release \
             -destination 'generic/platform=iOS' \
@@ -46,19 +49,23 @@ jobs:
           mkdir -p "$RUNNER_TEMP/Payload"
           cp -R "$APP" "$RUNNER_TEMP/Payload/"
           cd "$RUNNER_TEMP"
-          # Pre-sign with ldid so TrollStore keeps entitlements and embedded binaries load.
+          # Pre-sign every Mach-O (app + embedded frameworks) so TrollStore
+          # installs a consistent bundle and MobileVLCKit loads.
           if [ -f "$GITHUB_WORKSPACE/Cinefile.entitlements" ]; then
             ldid -S"$GITHUB_WORKSPACE/Cinefile.entitlements" "Payload/Cinefile.app/Cinefile" || true
           else
             ldid -S "Payload/Cinefile.app/Cinefile" || true
           fi
-          find "Payload/Cinefile.app" -maxdepth 3 -name "*.framework" | while read -r fw; do
+          find "Payload/Cinefile.app" -maxdepth 4 -name "*.framework" | while read -r fw; do
             name=$(basename "$fw" .framework)
             if [ -f "$fw/$name" ]; then ldid -S "$fw/$name" || true; fi
           done
+          find "Payload/Cinefile.app" -maxdepth 4 -name "*.dylib" | while read -r lib; do
+            ldid -S "$lib" || true
+          done
           zip -qry Cinefile-unsigned.ipa Payload
           ls -lh Cinefile-unsigned.ipa
-          unzip -l Cinefile-unsigned.ipa | head -20
+          du -sh "Payload/Cinefile.app"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4

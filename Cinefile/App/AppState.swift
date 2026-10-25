@@ -12,6 +12,7 @@ final class AppState: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var searchText = ""
+    @Published var playingEntry: Entry?
 
     private let store = LibraryStore()
     private var scopedURL: URL?
@@ -186,10 +187,11 @@ final class AppState: ObservableObject {
 
     // MARK: - Open entries
 
-    func open(_ entry: Entry) {
+    func play(_ entry: Entry) {
         if entry.isDirectory {
             navigate(to: entry.url)
+        } else {
+            playingEntry = entry
         }
-        // Video playback arrives in M2 (MPVKit).
     }
 }

@@ -138,7 +138,7 @@ struct BrowserView: View {
                 LazyVGrid(columns: gridItems, alignment: .leading, spacing: CF.gap) {
                     ForEach(app.filteredEntries) { entry in
                         Button {
-                            app.open(entry)
+                            app.play(entry)
                         } label: {
                             VideoCard(entry: entry)
                         }
