@@ -345,14 +345,14 @@ struct WelcomeView: View {
                 .frame(width: 30)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("视频在电脑或 NAS 上？")
+                Text("片库在电脑或 NAS 上？")
                     .font(CF.ui(CF.fontBody, weight: .semibold))
                     .foregroundColor(CF.text1)
-                Text("用 iPad 自带的「文件」App 连接服务器：浏览 → 右上角 ⋯ → 连接服务器 → 输入 smb://电脑IP，连上后回到这里选择那个位置。")
+                Text("应用内直连 SMB 正在开发中。现在可以先用 iPad 的「文件」App 连接服务器：浏览 → 右上角 ⋯ → 连接服务器 → 输入 smb://电脑IP，连上后回到这里选择那个位置。")
                     .font(CF.ui(14))
                     .foregroundColor(CF.text2)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("应用内直连 SMB 正在开发中；连上后可以先用「连接速度测试」确认带宽够不够。")
+                Text("选好后可以先用「连接速度测试」确认带宽够不够。")
                     .font(CF.ui(CF.fontSmall))
                     .foregroundColor(CF.text3)
                     .fixedSize(horizontal: false, vertical: true)
