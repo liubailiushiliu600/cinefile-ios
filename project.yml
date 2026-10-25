@@ -36,11 +36,9 @@ targets:
       properties:
         CFBundleDisplayName: Cinefile
         CFBundleName: Cinefile
-        CFBundleShortVersionString: "0.1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "0.1.1"
+        CFBundleVersion: "2"
         LSRequiresIPhoneOS: true
-        UIFileSharingEnabled: true
-        LSSupportsOpeningDocumentsInPlace: true
         NSLocalNetworkUsageDescription: "Cinefile 需要本地网络权限，用于发现附近设备、连接 SMB 共享与传输文件。"
         NSBonjourServices:
           - _cinefile._tcp
