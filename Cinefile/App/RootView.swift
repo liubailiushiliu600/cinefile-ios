@@ -5,13 +5,19 @@ import UniformTypeIdentifiers
 /// system navigation bar and no extra black bands around the content.
 struct RootView: View {
     @EnvironmentObject private var app: AppState
+    @StateObject private var peers = PeerService()
     @State private var showPicker = false
     @State private var showSpeedTest = false
+    @State private var showDevices = false
 
     var body: some View {
         GeometryReader { geo in
             HStack(spacing: 0) {
-                SidebarView(showPicker: $showPicker, showSpeedTest: $showSpeedTest)
+                SidebarView(
+                    showPicker: $showPicker,
+                    showSpeedTest: $showSpeedTest,
+                    showDevices: $showDevices
+                )
                     .frame(width: geo.size.width < 780 ? 248 : 300)
 
                 Rectangle()
@@ -56,8 +62,13 @@ struct RootView: View {
                 .environmentObject(app)
                 .preferredColorScheme(.dark)
         }
+        .sheet(isPresented: $showDevices) {
+            DevicesView()
+                .environmentObject(peers)
+                .preferredColorScheme(.dark)
+        }
         .fullScreenCover(item: $app.playingEntry) { entry in
-            PlayerScreen(entry: entry)
+            PlayerScreen(url: entry.url, title: entry.name, subtitle: entry.displaySize)
                 .preferredColorScheme(.dark)
         }
     }
@@ -78,6 +89,7 @@ struct SidebarView: View {
     @EnvironmentObject private var app: AppState
     @Binding var showPicker: Bool
     @Binding var showSpeedTest: Bool
+    @Binding var showDevices: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -97,6 +109,7 @@ struct SidebarView: View {
 
             Spacer(minLength: 0)
             Hairline()
+            devicesButton
             speedTestButton
             footer
         }
@@ -226,6 +239,28 @@ struct SidebarView: View {
                 }
             }
         }
+    }
+
+    private var devicesButton: some View {
+        Button {
+            showDevices = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 14, weight: .medium))
+                Text("附近设备")
+                    .font(CF.ui(CF.fontSmall, weight: .medium))
+                Spacer(minLength: 0)
+                Text("PC 端配对")
+                    .font(CF.mono(CF.fontCaption))
+                    .foregroundColor(CF.text3)
+            }
+            .foregroundColor(CF.text2)
+            .padding(.horizontal, 18)
+            .frame(height: 42)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var speedTestButton: some View {

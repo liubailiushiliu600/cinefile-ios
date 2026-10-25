@@ -4,7 +4,9 @@ import MobileVLCKit
 /// Full-screen player: VLC renders into a plain UIView, everything on top of
 /// it (transport bar, seek strip, track menus, auto-hide) is drawn here.
 struct PlayerScreen: View {
-    let entry: Entry
+    let url: URL
+    let title: String
+    var subtitle: String = ""
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var vm = VLCPlayer()
@@ -31,7 +33,7 @@ struct PlayerScreen: View {
         }
         .statusBarHidden(true)
         .onAppear {
-            vm.open(entry.url)
+            vm.open(url)
             scheduleHide()
         }
         .onDisappear {
@@ -94,13 +96,15 @@ struct PlayerScreen: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.name)
+                Text(title)
                     .font(CF.ui(CF.fontBody, weight: .medium))
                     .foregroundColor(CF.text1)
                     .lineLimit(1)
-                Text(entry.displaySize)
-                    .font(CF.mono(CF.fontCaption))
-                    .foregroundColor(CF.text3)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(CF.mono(CF.fontCaption))
+                        .foregroundColor(CF.text3)
+                }
             }
 
             Spacer(minLength: 0)
