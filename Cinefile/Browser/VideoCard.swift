@@ -15,10 +15,6 @@ struct VideoCard: View {
         }
         .background(CF.bg2)
         .clipShape(RoundedRectangle(cornerRadius: CF.radius))
-        .overlay(
-            RoundedRectangle(cornerRadius: CF.radius)
-                .stroke(CF.line, lineWidth: 1)
-        )
         .contentShape(RoundedRectangle(cornerRadius: CF.radius))
         .task(id: entry.id) {
             guard !entry.isDirectory else { return }
@@ -41,11 +37,11 @@ struct VideoCard: View {
                     .scaledToFill()
             } else if entry.isDirectory {
                 Image(systemName: "folder.fill")
-                    .font(.system(size: 30, weight: .light))
+                    .font(.system(size: 34, weight: .light))
                     .foregroundColor(CF.text3.opacity(0.65))
             } else if failed {
                 Image(systemName: "film")
-                    .font(.system(size: 26, weight: .light))
+                    .font(.system(size: 30, weight: .light))
                     .foregroundColor(CF.text3)
             } else {
                 ProgressView()
@@ -58,10 +54,10 @@ struct VideoCard: View {
         .overlay(alignment: .topLeading) {
             if !entry.isDirectory {
                 Text(entry.url.pathExtension.uppercased())
-                    .font(CF.mono(9, weight: .medium))
+                    .font(CF.mono(10, weight: .medium))
                     .foregroundColor(CF.text1)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
                     .background(
                         RoundedRectangle(cornerRadius: 6)
                             .fill(Color.black.opacity(0.6))
@@ -72,9 +68,9 @@ struct VideoCard: View {
     }
 
     private var info: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(entry.name)
-                .font(CF.ui(13, weight: .medium))
+                .font(CF.ui(15, weight: .medium))
                 .foregroundColor(CF.text1)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
@@ -83,11 +79,11 @@ struct VideoCard: View {
             HStack(spacing: 6) {
                 if entry.isDirectory {
                     Text("文件夹")
-                        .font(CF.mono(10))
+                        .font(CF.mono(12))
                         .foregroundColor(CF.text3)
                 } else {
                     Text(entry.displaySize)
-                        .font(CF.mono(10))
+                        .font(CF.mono(12))
                         .foregroundColor(CF.text3)
                 }
                 Spacer(minLength: 0)
@@ -96,6 +92,6 @@ struct VideoCard: View {
                 }
             }
         }
-        .padding(10)
+        .padding(12)
     }
 }

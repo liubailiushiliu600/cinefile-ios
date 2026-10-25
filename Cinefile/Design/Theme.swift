@@ -1,39 +1,47 @@
 import SwiftUI
 
-/// Cinefile design tokens — "Graphite & Gate", ported from design/tokens.css.
+/// Cinefile design tokens — "Graphite & Gate", tuned for iPad reading distance.
 enum CF {
-    // Surfaces: warm graphite, never pure black.
-    static let bg0 = Color(hex: 0x0F1011)
-    static let bg1 = Color(hex: 0x131416)
-    static let bg2 = Color(hex: 0x18191C)
-    static let bg3 = Color(hex: 0x1F2024)
-    static let bgHover = Color(hex: 0x22242A)
+    // Surfaces: lifted graphite. The desktop palette (#0F1011) reads as a black
+    // box on iPad, so every level is raised and the steps between levels are
+    // smaller; panels read as panels instead of holes.
+    static let bg0 = Color(hex: 0x17181B)
+    static let bg1 = Color(hex: 0x1D1E22)
+    static let bg2 = Color(hex: 0x24262B)
+    static let bg3 = Color(hex: 0x2C2E34)
+    static let bgHover = Color(hex: 0x32343B)
 
-    // Lines: hairlines only.
-    static let line = Color(hex: 0x26282D)
-    static let lineStrong = Color(hex: 0x383B41)
+    // Lines: hairlines only, and faint.
+    static let line = Color(hex: 0x2F3138)
+    static let lineStrong = Color(hex: 0x3E4149)
 
     // Text.
     static let text1 = Color(hex: 0xF2F0EB)
-    static let text2 = Color(hex: 0xB7B5AE)
-    static let text3 = Color(hex: 0x85857F)
+    static let text2 = Color(hex: 0xC2C0B9)
+    static let text3 = Color(hex: 0x8E8D87)
     static let textOnAccent = Color(hex: 0x181204)
 
     // Accent: one amber family.
     static let accent = Color(hex: 0xE2A24C)
     static let accentStrong = Color(hex: 0xF59E0B)
-    static let accentSoft = Color(hex: 0xE2A24C).opacity(0.12)
+    static let accentSoft = Color(hex: 0xE2A24C).opacity(0.14)
 
     // Viewing states.
-    static let stateUnwatched = Color(hex: 0x6E8BA6)
+    static let stateUnwatched = Color(hex: 0x7C9AB8)
     static let stateWatching = Color(hex: 0xE2A24C)
-    static let stateWatched = Color(hex: 0x6C6E73)
+    static let stateWatched = Color(hex: 0x7A7C82)
 
     // Feedback.
-    static let danger = Color(hex: 0xCF6E5A)
-    static let success = Color(hex: 0x86A783)
+    static let danger = Color(hex: 0xD97A66)
+    static let success = Color(hex: 0x8FB28C)
 
-    // Type.
+    // Type scale — iPad reading distance needs 15pt body, not 12pt.
+    static let fontDisplay: CGFloat = 34
+    static let fontTitle: CGFloat = 26
+    static let fontBody: CGFloat = 15
+    static let fontSmall: CGFloat = 13
+    static let fontCaption: CGFloat = 11
+
     static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .monospaced)
     }
@@ -45,8 +53,8 @@ enum CF {
     // Layout.
     static let radius: CGFloat = 12
     static let radiusSmall: CGFloat = 8
-    static let pad: CGFloat = 20
-    static let gap: CGFloat = 16
+    static let pad: CGFloat = 18
+    static let gap: CGFloat = 14
 }
 
 extension Color {
@@ -70,12 +78,12 @@ struct Hairline: View {
     }
 }
 
-/// Small mono uppercase label ("FOLDER / LOCAL", "LIBRARY").
+/// Small mono uppercase label ("LIBRARIES · 片库").
 struct Eyebrow: View {
     let text: String
     var body: some View {
         Text(text.uppercased())
-            .font(CF.mono(10, weight: .medium))
+            .font(CF.mono(CF.fontCaption, weight: .medium))
             .tracking(0.8)
             .foregroundColor(CF.text3)
     }

@@ -3,7 +3,7 @@ import SwiftUI
 /// The folder browser: breadcrumbs, toolbar, and the 16:9 thumbnail grid.
 struct BrowserView: View {
     @EnvironmentObject private var app: AppState
-    @AppStorage("gridColumns") private var columns: Int = 3
+    @AppStorage("gridColumns") private var columns: Int = 2
 
     private var gridItems: [GridItem] {
         let count = max(1, min(columns, 5))
@@ -31,20 +31,20 @@ struct BrowserView: View {
                         app.navigate(to: item.url)
                     } label: {
                         Text(item.name)
-                            .font(CF.mono(11))
+                            .font(CF.mono(12))
                             .foregroundColor(index == app.breadcrumbs.count - 1 ? CF.text1 : CF.text3)
                     }
                     .buttonStyle(.plain)
 
                     if index < app.breadcrumbs.count - 1 {
                         Text("/")
-                            .font(CF.mono(11))
+                            .font(CF.mono(12))
                             .foregroundColor(CF.lineStrong)
                     }
                 }
             }
             .padding(.horizontal, 20)
-            .frame(height: 40)
+            .frame(height: 44)
         }
     }
 
@@ -54,11 +54,11 @@ struct BrowserView: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(app.currentTitle)
-                    .font(CF.ui(24, weight: .semibold))
+                    .font(CF.ui(28, weight: .semibold))
                     .foregroundColor(CF.text1)
                     .lineLimit(1)
                 Text("\(app.folderCount) 个文件夹 · \(app.videoCount) 个视频 · 文件夹优先")
-                    .font(CF.mono(10))
+                    .font(CF.mono(12))
                     .foregroundColor(CF.text3)
                     .lineLimit(1)
             }
@@ -88,12 +88,12 @@ struct BrowserView: View {
                 .foregroundColor(CF.text3)
             TextField("搜索当前文件夹", text: $app.searchText)
                 .textFieldStyle(.plain)
-                .font(CF.ui(12))
+                .font(CF.ui(14))
                 .foregroundColor(CF.text1)
-                .frame(width: 160)
+                .frame(width: 190)
         }
-        .padding(.horizontal, 10)
-        .frame(height: 34)
+        .padding(.horizontal, 12)
+        .frame(height: 38)
         .background(RoundedRectangle(cornerRadius: CF.radiusSmall).fill(CF.bg0))
         .overlay(
             RoundedRectangle(cornerRadius: CF.radiusSmall)
@@ -108,9 +108,9 @@ struct BrowserView: View {
                     columns = value
                 } label: {
                     Text("\(value)")
-                        .font(CF.mono(11, weight: .medium))
+                        .font(CF.mono(12, weight: .medium))
                         .foregroundColor(columns == value ? CF.text1 : CF.text3)
-                        .frame(width: 26, height: 26)
+                        .frame(width: 30, height: 30)
                         .background(
                             RoundedRectangle(cornerRadius: 6)
                                 .fill(columns == value ? CF.bg3 : Color.clear)

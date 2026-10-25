@@ -6,10 +6,10 @@ struct CFButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(CF.ui(13, weight: .medium))
+            .font(CF.ui(CF.fontBody, weight: .medium))
             .foregroundColor(primary ? CF.textOnAccent : CF.text2)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 34)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 40)
             .background(
                 RoundedRectangle(cornerRadius: CF.radiusSmall)
                     .fill(primary ? CF.accent : Color.clear)
@@ -31,22 +31,22 @@ struct EmptyStateView: View {
     var action: (() -> Void)? = nil
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 16) {
             Image(systemName: systemImage)
-                .font(.system(size: 44, weight: .light))
+                .font(.system(size: 52, weight: .light))
                 .foregroundColor(CF.text3)
             Text(title)
-                .font(CF.ui(17, weight: .semibold))
+                .font(CF.ui(20, weight: .semibold))
                 .foregroundColor(CF.text1)
             Text(message)
-                .font(CF.ui(13))
+                .font(CF.ui(CF.fontBody))
                 .foregroundColor(CF.text3)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
+                .frame(maxWidth: 420)
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .buttonStyle(CFButtonStyle(primary: true))
-                    .padding(.top, 6)
+                    .padding(.top, 8)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -62,10 +62,10 @@ struct CFBadge: View {
 
     var body: some View {
         Text(text)
-            .font(CF.mono(10, weight: .medium))
+            .font(CF.mono(11, weight: .medium))
             .foregroundColor(filled ? CF.textOnAccent : color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(filled ? color : Color.black.opacity(0.55))
@@ -85,11 +85,11 @@ struct PanelHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(CF.ui(20, weight: .semibold))
+                .font(CF.ui(22, weight: .semibold))
                 .foregroundColor(CF.text1)
             if let subtitle {
                 Text(subtitle)
-                    .font(CF.ui(12))
+                    .font(CF.ui(14))
                     .foregroundColor(CF.text3)
             }
         }
