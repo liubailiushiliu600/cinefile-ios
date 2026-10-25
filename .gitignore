@@ -1,0 +1,16 @@
+# XcodeGen output
+Cinefile.xcodeproj/
+
+# Build products
+build/
+DerivedData/
+*.xcarchive
+*.ipa
+*.dSYM
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+
+# macOS
+.DS_Store

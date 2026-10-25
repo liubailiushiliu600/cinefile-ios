@@ -1,0 +1,68 @@
+name: Build Cinefile IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: brew install xcodegen ldid
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build (unsigned archive)
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project Cinefile.xcodeproj \
+            -scheme Cinefile \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Cinefile.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            ONLY_ACTIVE_ARCH=NO
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/Cinefile.xcarchive/Products/Applications/Cinefile.app"
+          test -d "$APP"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP"
+          # Pre-sign with ldid so TrollStore keeps entitlements and embedded binaries load.
+          if [ -f "$GITHUB_WORKSPACE/Cinefile.entitlements" ]; then
+            ldid -S"$GITHUB_WORKSPACE/Cinefile.entitlements" "Payload/Cinefile.app/Cinefile" || true
+          else
+            ldid -S "Payload/Cinefile.app/Cinefile" || true
+          fi
+          find "Payload/Cinefile.app" -maxdepth 3 -name "*.framework" | while read -r fw; do
+            name=$(basename "$fw" .framework)
+            if [ -f "$fw/$name" ]; then ldid -S "$fw/$name" || true; fi
+          done
+          zip -qry Cinefile-unsigned.ipa Payload
+          ls -lh Cinefile-unsigned.ipa
+          unzip -l Cinefile-unsigned.ipa | head -20
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cinefile-unsigned-ipa
+          path: ${{ runner.temp }}/Cinefile-unsigned.ipa
+          if-no-files-found: error
