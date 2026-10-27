@@ -1,11 +1,16 @@
 import CryptoKit
+import Darwin
 import Foundation
 import MobileVLCKit
 import UIKit
 
 /// Caps parallel FFmpeg decodes so a folder does not spawn ten at once.
 /// File-scope (not actor-isolated) because it is waited on a GCD queue.
-private let ffmpegGate = DispatchSemaphore(value: 2)
+private let ffmpegGate = DispatchSemaphore(value: 1)
+
+/// Below this much free memory we stop starting new captures. A VLC instance
+/// costs 100–300 MB (it keeps demux caches), which OOMs a 3 GB iPad quickly.
+private let minimumFreeMemory: UInt64 = 260 * 1024 * 1024
 
 /// Thumbnails for files on a paired peer's SMB share.
 ///
@@ -43,7 +48,9 @@ final class RemoteThumbnailService {
 
     private var queue: [Job] = []
     private var sessions: [UUID: Session] = [:]
-    private let maxConcurrent = 2
+    // One VLC capture at a time: each instance is heavy, and this app runs on
+    // 3 GB iPads. FFmpeg handles the fast path anyway.
+    private let maxConcurrent = 1
     private let cacheDirectory: URL
 
     private init() {
@@ -101,6 +108,17 @@ final class RemoteThumbnailService {
 
     private func pump() {
         guard !PlaybackActivity.shared.isPlaying else { return }
+
+        // Memory guard: do not start another VLC instance when the device is
+        // already tight. Retry later instead of piling up and getting killed.
+        let free = os_proc_available_memory()
+        if free > 0, free < minimumFreeMemory {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                self?.pump()
+            }
+            return
+        }
+
         while sessions.count < maxConcurrent, !queue.isEmpty {
             start(queue.removeFirst())
         }
@@ -132,6 +150,11 @@ final class RemoteThumbnailService {
         let media = VLCMedia(url: job.url)
         media.addOption(":start-time=3")
         media.addOption(":no-audio")
+        // Keep the decoder's buffers small: defaults can reserve hundreds of MB.
+        media.addOption(":demuxer-max-bytes=8MiB")
+        media.addOption(":demuxer-max-back-bytes=2MiB")
+        media.addOption(":file-caching=300")
+        media.addOption(":network-caching=1000")
         player.media = media
         player.play()
 
@@ -165,7 +188,7 @@ final class RemoteThumbnailService {
         let job = session.job
         let destination = cacheDirectory.appendingPathComponent(Self.key(for: job.entry) + ".jpg")
         try? FileManager.default.removeItem(at: destination)
-        session.player.saveVideoSnapshot(at: destination.path, withWidth: 640, andHeight: 360)
+        session.player.saveVideoSnapshot(at: destination.path, withWidth: 480, andHeight: 270)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self else { return }

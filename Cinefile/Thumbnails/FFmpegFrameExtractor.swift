@@ -21,7 +21,7 @@ enum FFmpegFrameExtractor {
         path: String,
         fileSize: Int64,
         at seconds: Double,
-        maxWidth: Int32 = 640
+        maxWidth: Int32 = 480
     ) -> UIImage? {
         guard fileSize > 0, maxWidth > 0 else { return nil }
         av_log_set_level(-8)  // AV_LOG_QUIET

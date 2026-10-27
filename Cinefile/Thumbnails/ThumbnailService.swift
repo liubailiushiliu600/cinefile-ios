@@ -56,7 +56,8 @@ final class ThumbnailService: @unchecked Sendable {
 
     private func store(_ key: String, _ image: UIImage) {
         lock.lock()
-        if memory.count > 240 { memory.removeAll(keepingCapacity: true) }
+        // 60 frames at 480x270 ≈ 30 MB; 240 frames was a memory bomb on 3 GB iPads.
+        if memory.count > 60 { memory.removeAll(keepingCapacity: true) }
         memory[key] = image
         lock.unlock()
     }
@@ -73,7 +74,7 @@ final class ThumbnailService: @unchecked Sendable {
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 640, height: 360)
+        generator.maximumSize = CGSize(width: 480, height: 270)
         generator.requestedTimeToleranceBefore = CMTime(seconds: 1, preferredTimescale: 600)
         generator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
 
