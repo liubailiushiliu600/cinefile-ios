@@ -9,7 +9,6 @@ struct RootView: View {
     @State private var showPicker = false
     @State private var showSpeedTest = false
     @State private var showDevices = false
-    @State private var openPeer: PairedPeer?
 
     var body: some View {
         GeometryReader { geo in
@@ -18,8 +17,7 @@ struct RootView: View {
                     showPicker: $showPicker,
                     showSpeedTest: $showSpeedTest,
                     showDevices: $showDevices,
-                    peers: peers,
-                    openPeer: $openPeer
+                    peers: peers
                 )
                     .frame(width: geo.size.width < 780 ? 248 : 300)
 
@@ -67,28 +65,19 @@ struct RootView: View {
         }
         .sheet(isPresented: $showDevices) {
             DevicesView()
+                .environmentObject(app)
                 .environmentObject(peers)
                 .preferredColorScheme(.dark)
         }
-        .sheet(item: $openPeer) { peer in
-            if let access = peers.access(for: peer) {
-                SMBBrowserView(peer: peer, access: access)
-                    .preferredColorScheme(.dark)
-            } else {
-                Text("缺少这台设备的 SMB 凭据，请重新配对。")
-                    .padding(40)
-                    .background(CF.bg0)
-            }
-        }
-        .fullScreenCover(item: $app.playingEntry) { entry in
-            PlayerScreen(url: entry.url, title: entry.name, subtitle: entry.displaySize)
+        .fullScreenCover(item: $app.playingRequest) { request in
+            PlayerScreen(url: request.url, title: request.title)
                 .preferredColorScheme(.dark)
         }
     }
 
     @ViewBuilder
     private var detail: some View {
-        if app.currentLibrary != nil {
+        if app.currentSource != nil {
             BrowserView()
         } else {
             WelcomeView(showPicker: $showPicker, showSpeedTest: $showSpeedTest)
@@ -104,7 +93,6 @@ struct SidebarView: View {
     @Binding var showSpeedTest: Bool
     @Binding var showDevices: Bool
     @ObservedObject var peers: PeerService
-    @Binding var openPeer: PairedPeer?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -115,7 +103,7 @@ struct SidebarView: View {
                 VStack(alignment: .leading, spacing: 26) {
                     librarySection
                     networkSection
-                    if app.currentLibrary != nil {
+                    if app.currentSource != nil {
                         folderSection
                     }
                 }
@@ -185,7 +173,10 @@ struct SidebarView: View {
     }
 
     private func libraryRow(_ ref: LibraryRef) -> some View {
-        let active = app.currentLibrary?.id == ref.id
+        var active = false
+        if case .local(let current) = app.currentSource {
+            active = current.id == ref.id
+        }
         return Button {
             app.open(ref)
         } label: {
@@ -242,17 +233,22 @@ struct SidebarView: View {
 
     private func networkRow(_ peer: PairedPeer) -> some View {
         let online = peers.isOnline(peer)
+        var active = false
+        if case .network(let current) = app.currentSource {
+            active = current.instanceId == peer.instanceId
+        }
         return Button {
-            openPeer = peer
+            guard let access = peers.access(for: peer) else { return }
+            Task { await app.openNetwork(peer: peer, access: access) }
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "network")
                     .font(.system(size: 14))
-                    .foregroundColor(online ? CF.accent : CF.text3)
+                    .foregroundColor(active || online ? CF.accent : CF.text3)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(peer.hostname)
-                        .font(CF.ui(14, weight: .medium))
-                        .foregroundColor(CF.text1)
+                        .font(CF.ui(14, weight: active ? .semibold : .medium))
+                        .foregroundColor(active ? CF.text1 : CF.text1)
                         .lineLimit(1)
                     Text(peer.shareLabel.isEmpty ? "网络共享" : peer.shareLabel)
                         .font(CF.mono(CF.fontCaption))
@@ -266,7 +262,18 @@ struct SidebarView: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 46)
-            .background(RoundedRectangle(cornerRadius: CF.radiusSmall).fill(CF.bg2))
+            .background(
+                RoundedRectangle(cornerRadius: CF.radiusSmall)
+                    .fill(active ? CF.bg3 : CF.bg2)
+            )
+            .overlay(alignment: .leading) {
+                if active {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(CF.accent)
+                        .frame(width: 3, height: 20)
+                        .padding(.leading, 2)
+                }
+            }
         }
         .buttonStyle(.plain)
     }
@@ -282,7 +289,7 @@ struct SidebarView: View {
             } else {
                 ForEach(folders) { entry in
                     Button {
-                        app.navigate(to: entry.url)
+                        app.activate(entry)
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "folder")

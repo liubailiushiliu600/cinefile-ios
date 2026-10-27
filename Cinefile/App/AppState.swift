@@ -1,104 +1,175 @@
 import Foundation
 import SwiftUI
 
-/// Global shell state: current library, current folder, entries, search.
+/// Global shell state: one browser that can show a local folder or a paired
+/// peer's SMB share. Both go through the same entries / grid / sorting path, so
+/// a network library feels exactly like opening a folder.
 @MainActor
 final class AppState: ObservableObject {
+    enum Source: Equatable {
+        case local(LibraryRef)
+        case network(PairedPeer)
+    }
+
+    struct Crumb: Identifiable, Equatable {
+        let id: String
+        let name: String
+        let localURL: URL?
+        let remotePath: String?
+    }
+
     @Published var libraries: [LibraryRef] = []
-    @Published var currentLibrary: LibraryRef?
-    @Published var rootURL: URL?
-    @Published var currentURL: URL?
+    @Published var currentSource: Source?
     @Published var entries: [Entry] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var searchText = ""
-    @Published var playingEntry: Entry?
+    @Published var playingRequest: PlayRequest?
+    @Published var sortMode: SortMode = .name
+    @Published var remotePath = ""
 
     private let store = LibraryStore()
     private var scopedURL: URL?
+    private var rootURL: URL?
+    private var currentLocalURL: URL?
     private var didRestore = false
+
+    private var smbClient: SMBClient?
+    private var smbAccess: SMBAccess?
 
     init() {
         libraries = store.load()
     }
 
-    /// Reopen the most recent library once, on first appearance.
+    /// Reopen the most recent local library once, on first appearance.
     func restoreLastIfNeeded() {
         guard !didRestore else { return }
         didRestore = true
-        guard currentLibrary == nil, let first = libraries.first else { return }
+        guard currentSource == nil, let first = libraries.first else { return }
         open(first)
     }
 
     // MARK: - Derived
 
-    var filteredEntries: [Entry] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return entries }
-        return entries.filter { $0.name.localizedCaseInsensitiveContains(query) }
-    }
-
-    var breadcrumbs: [(name: String, url: URL)] {
-        guard let root = rootURL, let current = currentURL else { return [] }
-        let rootStd = root.standardizedFileURL
-        let currentStd = current.standardizedFileURL
-        var items: [(name: String, url: URL)] = [(rootStd.lastPathComponent, rootStd)]
-
-        let rootPath = rootStd.path
-        let currentPath = currentStd.path
-        guard currentPath != rootPath, currentPath.hasPrefix(rootPath + "/") else { return items }
-
-        let relative = String(currentPath.dropFirst(rootPath.count + 1))
-        var accumulated = rootStd
-        for component in relative.split(separator: "/") where !component.isEmpty {
-            accumulated = accumulated.appendingPathComponent(String(component))
-            items.append((String(component), accumulated))
-        }
-        return items
-    }
-
-    var canGoUp: Bool {
-        guard let current = currentURL, let root = rootURL else { return false }
-        return current.standardizedFileURL.path != root.standardizedFileURL.path
+    var isNetwork: Bool {
+        if case .network = currentSource { return true }
+        return false
     }
 
     var currentTitle: String {
-        currentURL?.lastPathComponent ?? currentLibrary?.name ?? "Cinefile"
+        switch currentSource {
+        case .local:
+            return currentLocalURL?.lastPathComponent ?? "Cinefile"
+        case .network(let peer):
+            if remotePath.isEmpty { return peer.hostname }
+            return remotePath.split(separator: "/").last.map(String.init) ?? peer.hostname
+        case .none:
+            return "Cinefile"
+        }
+    }
+
+    var filteredEntries: [Entry] {
+        let ordered = entries.sortedByMode(sortMode)
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return ordered }
+        return ordered.filter { $0.name.localizedCaseInsensitiveContains(query) }
     }
 
     var folderCount: Int { entries.filter { $0.isDirectory }.count }
     var videoCount: Int { entries.filter { !$0.isDirectory }.count }
 
-    // MARK: - Library lifecycle
+    var breadcrumbs: [Crumb] {
+        switch currentSource {
+        case .local:
+            guard let root = rootURL, let current = currentLocalURL else { return [] }
+            let rootStd = root.standardizedFileURL
+            let currentStd = current.standardizedFileURL
+            var items = [Crumb(id: "root", name: rootStd.lastPathComponent, localURL: rootStd, remotePath: nil)]
+
+            let rootPath = rootStd.path
+            let currentPath = currentStd.path
+            guard currentPath != rootPath, currentPath.hasPrefix(rootPath + "/") else { return items }
+
+            let relative = String(currentPath.dropFirst(rootPath.count + 1))
+            var accumulated = rootStd
+            for (index, component) in relative.split(separator: "/").enumerated() where !component.isEmpty {
+                accumulated = accumulated.appendingPathComponent(String(component))
+                items.append(
+                    Crumb(
+                        id: "local-\(index)",
+                        name: String(component),
+                        localURL: accumulated,
+                        remotePath: nil
+                    )
+                )
+            }
+            return items
+
+        case .network(let peer):
+            var items = [Crumb(id: "net-root", name: peer.hostname, localURL: nil, remotePath: "")]
+            var accumulated = ""
+            for (index, component) in remotePath.split(separator: "/").enumerated() {
+                accumulated = accumulated.isEmpty ? String(component) : "\(accumulated)/\(component)"
+                items.append(
+                    Crumb(
+                        id: "net-\(index)",
+                        name: String(component),
+                        localURL: nil,
+                        remotePath: accumulated
+                    )
+                )
+            }
+            return items
+
+        case .none:
+            return []
+        }
+    }
+
+    var canGoUp: Bool {
+        switch currentSource {
+        case .local:
+            guard let current = currentLocalURL, let root = rootURL else { return false }
+            return current.standardizedFileURL.path != root.standardizedFileURL.path
+        case .network:
+            return !remotePath.isEmpty
+        case .none:
+            return false
+        }
+    }
+
+    // MARK: - Local libraries
 
     func open(_ ref: LibraryRef) {
         guard let url = store.resolve(ref) else {
             errorMessage = "无法访问「\(ref.name)」，请重新选择这个文件夹。"
             return
         }
+        closeSMB()
         stopScope()
         _ = url.startAccessingSecurityScopedResource()
         scopedURL = url
         rootURL = url
-        currentLibrary = ref
+        currentSource = .local(ref)
         libraries = store.touch(ref)
 
-        // Restore the last visited sub-folder when it still exists.
         let restored = URL(fileURLWithPath: ref.lastPath)
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: restored.path, isDirectory: &isDirectory)
         let insideRoot = restored.path == url.path || restored.path.hasPrefix(url.path + "/")
         if exists && isDirectory.boolValue && insideRoot {
-            navigate(to: restored)
+            navigateLocal(restored)
         } else {
-            navigate(to: url)
+            navigateLocal(url)
         }
     }
 
     func open(url: URL) {
+        closeSMB()
         stopScope()
         _ = url.startAccessingSecurityScopedResource()
         scopedURL = url
+        rootURL = url
 
         let ref = store.add(url: url) ?? LibraryRef(
             id: LibraryStore.key(for: url),
@@ -107,17 +178,186 @@ final class AppState: ObservableObject {
             lastPath: url.path,
             lastOpened: Date()
         )
-        rootURL = url
-        currentLibrary = ref
+        currentSource = .local(ref)
         libraries = store.load()
-        navigate(to: url)
+        navigateLocal(url)
     }
 
-    func closeLibrary() {
+    // MARK: - Network library
+
+    func openNetwork(peer: PairedPeer, access: SMBAccess) async {
         stopScope()
-        currentLibrary = nil
+        closeSMB()
+
+        guard let client = SMBClient(access: access) else {
+            errorMessage = "无法创建 SMB 连接：地址或凭据格式不正确。"
+            return
+        }
+
+        isLoading = true
+        errorMessage = nil
+        searchText = ""
+        remotePath = ""
+        entries = []
+
+        do {
+            try await client.connect()
+            smbClient = client
+            smbAccess = access
+            currentSource = .network(peer)
+
+            let items = try await client.list("")
+            entries = items
+                .map(Self.remoteEntry)
+                .filter { $0.isDirectory || DirectoryLister.isVideo($0.name) }
+        } catch {
+            errorMessage = "连接 \(access.server) 失败：\(error.localizedDescription)"
+            currentSource = nil
+        }
+        isLoading = false
+    }
+
+    private static func remoteEntry(_ item: SMBEntry) -> Entry {
+        Entry(
+            id: "remote:\(item.path)",
+            name: item.name,
+            location: .remote(path: item.path),
+            isDirectory: item.isDirectory,
+            size: item.size,
+            mtime: item.mtime
+        )
+    }
+
+    // MARK: - Navigation
+
+    func navigateLocal(_ url: URL) {
+        isLoading = true
+        errorMessage = nil
+        searchText = ""
+
+        Task {
+            do {
+                let list = try await Task.detached(priority: .userInitiated) {
+                    try DirectoryLister.list(url)
+                }.value
+                entries = list
+                currentLocalURL = url
+                if case .local(var ref) = currentSource {
+                    ref.lastPath = url.path
+                    currentSource = .local(ref)
+                    store.updateLastPath(id: ref.id, path: url.path)
+                }
+            } catch {
+                entries = []
+                currentLocalURL = url
+                errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+            isLoading = false
+        }
+    }
+
+    func navigateRemote(_ path: String) {
+        guard let client = smbClient else { return }
+        isLoading = true
+        errorMessage = nil
+        searchText = ""
+
+        Task {
+            do {
+                let items = try await client.list(path)
+                entries = items
+                    .map(Self.remoteEntry)
+                    .filter { $0.isDirectory || DirectoryLister.isVideo($0.name) }
+                remotePath = path
+            } catch {
+                entries = []
+                errorMessage = "读取目录失败：\(error.localizedDescription)"
+            }
+            isLoading = false
+        }
+    }
+
+    func reload() {
+        if isNetwork {
+            navigateRemote(remotePath)
+        } else if let current = currentLocalURL {
+            navigateLocal(current)
+        }
+    }
+
+    func goUp() {
+        switch currentSource {
+        case .local:
+            guard let current = currentLocalURL, let root = rootURL else { return }
+            let parent = current.deletingLastPathComponent().standardizedFileURL
+            let rootStd = root.standardizedFileURL
+            guard parent.path != current.standardizedFileURL.path else { return }
+            guard parent.path == rootStd.path || parent.path.hasPrefix(rootStd.path + "/") else { return }
+            navigateLocal(parent)
+
+        case .network:
+            let parent = remotePath.split(separator: "/").dropLast().joined(separator: "/")
+            navigateRemote(parent)
+
+        case .none:
+            break
+        }
+    }
+
+    func goRoot() {
+        switch currentSource {
+        case .local:
+            if let root = rootURL { navigateLocal(root) }
+        case .network:
+            navigateRemote("")
+        case .none:
+            break
+        }
+    }
+
+    func openCrumb(_ crumb: Crumb) {
+        if let url = crumb.localURL {
+            navigateLocal(url)
+        } else if let path = crumb.remotePath {
+            navigateRemote(path)
+        }
+    }
+
+    // MARK: - Entries
+
+    func activate(_ entry: Entry) {
+        if entry.isDirectory {
+            switch entry.location {
+            case .local(let url):
+                navigateLocal(url)
+            case .remote(let path):
+                navigateRemote(path)
+            }
+            return
+        }
+
+        switch entry.location {
+        case .local(let url):
+            playingRequest = PlayRequest(url: url, title: entry.name)
+
+        case .remote(let path):
+            guard let access = smbAccess, let url = access.playbackURL(relativePath: path) else {
+                errorMessage = "无法为这个文件生成播放地址。"
+                return
+            }
+            playingRequest = PlayRequest(url: url, title: entry.name)
+        }
+    }
+
+    // MARK: - Lifecycle
+
+    func closeLibrary() {
+        closeSMB()
+        stopScope()
+        currentSource = nil
+        currentLocalURL = nil
         rootURL = nil
-        currentURL = nil
+        remotePath = ""
         entries = []
         searchText = ""
         errorMessage = nil
@@ -126,7 +366,7 @@ final class AppState: ObservableObject {
     func forget(_ ref: LibraryRef) {
         store.remove(id: ref.id)
         libraries = store.load()
-        if currentLibrary?.id == ref.id {
+        if case .local(let current) = currentSource, current.id == ref.id {
             closeLibrary()
         }
     }
@@ -138,60 +378,19 @@ final class AppState: ObservableObject {
         scopedURL = nil
     }
 
-    // MARK: - Navigation
-
-    func navigate(to url: URL) {
-        isLoading = true
-        errorMessage = nil
-        searchText = ""
-
-        Task {
-            do {
-                let list = try await Task.detached(priority: .userInitiated) {
-                    try DirectoryLister.list(url)
-                }.value
-                entries = list
-                currentURL = url
-                if var library = currentLibrary {
-                    library.lastPath = url.path
-                    currentLibrary = library
-                    store.updateLastPath(id: library.id, path: url.path)
-                }
-            } catch {
-                entries = []
-                currentURL = url
-                errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            }
-            isLoading = false
+    private func closeSMB() {
+        if let client = smbClient {
+            Task { await client.disconnect() }
         }
+        smbClient = nil
+        smbAccess = nil
     }
 
-    func reload() {
-        guard let current = currentURL else { return }
-        navigate(to: current)
-    }
+    /// SMB credentials for the active network library (used by thumbnails/speed test).
+    var activeSMBAccess: SMBAccess? { smbAccess }
 
-    func goUp() {
-        guard let current = currentURL, let root = rootURL else { return }
-        let parent = current.deletingLastPathComponent().standardizedFileURL
-        let rootStd = root.standardizedFileURL
-        guard parent.path != current.standardizedFileURL.path else { return }
-        guard parent.path == rootStd.path || parent.path.hasPrefix(rootStd.path + "/") else { return }
-        navigate(to: parent)
-    }
+    var activeSMBClient: SMBClient? { smbClient }
 
-    func goRoot() {
-        guard let root = rootURL else { return }
-        navigate(to: root)
-    }
-
-    // MARK: - Open entries
-
-    func play(_ entry: Entry) {
-        if entry.isDirectory {
-            navigate(to: entry.url)
-        } else {
-            playingEntry = entry
-        }
-    }
+    /// Local folder currently shown (nil for network libraries).
+    var currentLocalFolder: URL? { currentLocalURL }
 }

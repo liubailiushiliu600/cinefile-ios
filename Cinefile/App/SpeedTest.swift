@@ -31,6 +31,7 @@ struct SpeedSample: Sendable {
 enum SpeedTestError: LocalizedError {
     case noLibrary
     case noVideo
+    case noSmallVideo
     case readFailed(String)
 
     var errorDescription: String? {
@@ -39,6 +40,8 @@ enum SpeedTestError: LocalizedError {
             return "请先在主界面打开一个文件夹，再回来测速。"
         case .noVideo:
             return "这个文件夹里没有找到视频文件，换个目录再试。"
+        case .noSmallVideo:
+            return "这个目录里没有 128 MB 以内的视频文件，无法做轻量测速；播放时观察缓冲即可。"
         case .readFailed(let message):
             return "读取失败：\(message)"
         }
@@ -129,6 +132,34 @@ enum SpeedTester {
             firstByteSeconds: firstByteSeconds
         )
     }
+
+    /// Network speed test: read the smallest video (≤128 MB) through SMB.
+    static func runNetwork(
+        folder: String,
+        client: SMBClient,
+        limit: Int64 = sampleBytes
+    ) async throws -> SpeedSample {
+        let items = try await client.list(folder)
+        let videos = items.filter { !$0.isDirectory && DirectoryLister.isVideo($0.name) && $0.size > 0 }
+        guard !videos.isEmpty else { throw SpeedTestError.noVideo }
+
+        let candidates = videos.filter { $0.size <= 128 * 1024 * 1024 }
+        guard let target = candidates.min(by: { $0.size < $1.size }) else {
+            throw SpeedTestError.noSmallVideo
+        }
+
+        let start = CFAbsoluteTimeGetCurrent()
+        let data = try await client.read(target.path)
+        let elapsed = max(CFAbsoluteTimeGetCurrent() - start, 0.001)
+
+        return SpeedSample(
+            fileName: target.name,
+            fileSize: target.size,
+            bytesRead: Int64(data.count),
+            seconds: elapsed,
+            firstByteSeconds: elapsed
+        )
+    }
 }
 
 // MARK: - View
@@ -192,14 +223,14 @@ struct SpeedTestView: View {
 
     private var target: some View {
         HStack(spacing: 12) {
-            Image(systemName: "folder")
+            Image(systemName: app.isNetwork ? "network" : "folder")
                 .font(.system(size: 15))
                 .foregroundColor(CF.accent)
             VStack(alignment: .leading, spacing: 2) {
-                Text(app.currentURL?.lastPathComponent ?? "未打开文件夹")
+                Text(app.isNetwork ? app.currentTitle : (app.currentLocalFolder?.lastPathComponent ?? "未打开文件夹"))
                     .font(CF.ui(CF.fontBody, weight: .medium))
                     .foregroundColor(CF.text1)
-                Text(app.currentURL?.path ?? "先回到主界面打开一个文件夹")
+                Text(targetDetail)
                     .font(CF.mono(11))
                     .foregroundColor(CF.text3)
                     .lineLimit(1)
@@ -209,6 +240,17 @@ struct SpeedTestView: View {
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: CF.radiusSmall).fill(CF.bg2))
+    }
+
+    private var targetDetail: String {
+        if app.isNetwork {
+            return app.remotePath.isEmpty ? "网络片库 · 共享根目录" : "网络片库 · \(app.remotePath)"
+        }
+        return app.currentLocalFolder?.path ?? "先回到主界面打开一个文件夹"
+    }
+
+    private var hasTarget: Bool {
+        app.isNetwork ? app.activeSMBClient != nil : app.currentLocalFolder != nil
     }
 
     @ViewBuilder
@@ -320,7 +362,7 @@ struct SpeedTestView: View {
                     .padding(.vertical, 3)
             }
             .buttonStyle(CFButtonStyle(primary: true))
-            .disabled(phase.isRunning || app.currentURL == nil)
+            .disabled(phase.isRunning || !hasTarget)
 
             Button("完成") { dismiss() }
                 .buttonStyle(CFButtonStyle())
@@ -330,7 +372,26 @@ struct SpeedTestView: View {
     // MARK: Actions
 
     private func runTest() {
-        guard let folder = app.currentURL else {
+        if app.isNetwork {
+            guard let client = app.activeSMBClient else {
+                phase = .failed("网络片库未连接，请重新打开对方片库。")
+                return
+            }
+            let folder = app.remotePath
+            phase = .running
+            Task {
+                do {
+                    let sample = try await SpeedTester.runNetwork(folder: folder, client: client)
+                    phase = .done(sample)
+                } catch {
+                    let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    phase = .failed(message)
+                }
+            }
+            return
+        }
+
+        guard let folder = app.currentLocalFolder else {
             phase = .failed(SpeedTestError.noLibrary.errorDescription ?? "")
             return
         }

@@ -3,10 +3,10 @@ import SwiftUI
 /// Nearby devices: scan, pair, open the peer's library.
 struct DevicesView: View {
     @EnvironmentObject private var peers: PeerService
+    @EnvironmentObject private var app: AppState
     @Environment(\.dismiss) private var dismiss
 
     @State private var pairingTarget: PeerBeacon?
-    @State private var openPeer: PairedPeer?
     @State private var showManual = false
     @State private var manualHost = ""
     @State private var manualBusy = false
@@ -36,16 +36,6 @@ struct DevicesView: View {
         .sheet(isPresented: $showManual) {
             manualSheet
                 .preferredColorScheme(.dark)
-        }
-        .sheet(item: $openPeer) { peer in
-            if let access = peers.access(for: peer) {
-                SMBBrowserView(peer: peer, access: access)
-                    .preferredColorScheme(.dark)
-            } else {
-                Text("缺少这台设备的 SMB 凭据，请重新配对。")
-                    .padding(40)
-                    .background(CF.bg0)
-            }
         }
     }
 
@@ -264,7 +254,11 @@ struct DevicesView: View {
             Spacer(minLength: 8)
 
             Button("打开片库") {
-                openPeer = peer
+                guard let access = peers.access(for: peer) else { return }
+                Task {
+                    await app.openNetwork(peer: peer, access: access)
+                    dismiss()
+                }
             }
             .buttonStyle(CFButtonStyle(primary: true))
 

@@ -1,7 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// 16:9 card: thumbnail (or folder art), name, size, rating slot.
+/// 16:9 card: thumbnail (or format placeholder), name, size, rating slot.
+/// Used for both local files and files on a paired peer's share.
 struct VideoCard: View {
     let entry: Entry
 
@@ -39,6 +40,16 @@ struct VideoCard: View {
                 Image(systemName: "folder.fill")
                     .font(.system(size: 34, weight: .light))
                     .foregroundColor(CF.text3.opacity(0.65))
+            } else if entry.isRemote {
+                // SMB thumbnails need a decode pass; show a clean format plate
+                // instead of a spinner that never resolves.
+                VStack(spacing: 7) {
+                    Image(systemName: "film")
+                        .font(.system(size: 30, weight: .light))
+                    Text(entry.fileExtension.uppercased())
+                        .font(CF.mono(11, weight: .medium))
+                }
+                .foregroundColor(CF.text3)
             } else if failed {
                 Image(systemName: "film")
                     .font(.system(size: 30, weight: .light))
@@ -53,16 +64,22 @@ struct VideoCard: View {
         .clipped()
         .overlay(alignment: .topLeading) {
             if !entry.isDirectory {
-                Text(entry.url.pathExtension.uppercased())
-                    .font(CF.mono(10, weight: .medium))
-                    .foregroundColor(CF.text1)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.black.opacity(0.6))
-                    )
-                    .padding(8)
+                HStack(spacing: 4) {
+                    if entry.isRemote {
+                        Image(systemName: "network")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    Text(entry.fileExtension.uppercased())
+                        .font(CF.mono(10, weight: .medium))
+                }
+                .foregroundColor(CF.text1)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.black.opacity(0.6))
+                )
+                .padding(8)
             }
         }
     }

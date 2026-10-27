@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The folder browser: breadcrumbs, toolbar, and the 16:9 thumbnail grid.
+/// The folder browser: breadcrumbs, toolbar (search / sort / columns), and the
+/// 16:9 thumbnail grid. Works identically for local folders and paired peers.
 struct BrowserView: View {
     @EnvironmentObject private var app: AppState
     @AppStorage("gridColumns") private var columns: Int = 2
@@ -26,11 +27,11 @@ struct BrowserView: View {
     private var breadcrumbBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ForEach(Array(app.breadcrumbs.enumerated()), id: \.offset) { index, item in
+                ForEach(Array(app.breadcrumbs.enumerated()), id: \.element.id) { index, crumb in
                     Button {
-                        app.navigate(to: item.url)
+                        app.openCrumb(crumb)
                     } label: {
-                        Text(item.name)
+                        Text(crumb.name)
                             .font(CF.mono(12))
                             .foregroundColor(index == app.breadcrumbs.count - 1 ? CF.text1 : CF.text3)
                     }
@@ -51,21 +52,32 @@ struct BrowserView: View {
     // MARK: - Toolbar
 
     private var toolbar: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(app.currentTitle)
-                    .font(CF.ui(28, weight: .semibold))
-                    .foregroundColor(CF.text1)
-                    .lineLimit(1)
-                Text("\(app.folderCount) 个文件夹 · \(app.videoCount) 个视频 · 文件夹优先")
-                    .font(CF.mono(12))
-                    .foregroundColor(CF.text3)
-                    .lineLimit(1)
+                HStack(spacing: 8) {
+                    if app.isNetwork {
+                        Image(systemName: "network")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(CF.accent)
+                    }
+                    Text(app.currentTitle)
+                        .font(CF.ui(28, weight: .semibold))
+                        .foregroundColor(CF.text1)
+                        .lineLimit(1)
+                }
+                Text(
+                    "\(app.folderCount) 个文件夹 · \(app.videoCount) 个视频 · "
+                    + (app.isNetwork ? "网络片库" : "文件夹优先")
+                )
+                .font(CF.mono(12))
+                .foregroundColor(CF.text3)
+                .lineLimit(1)
             }
 
             Spacer(minLength: 8)
 
             searchField
+            sortMenu
 
             Button {
                 app.reload()
@@ -90,7 +102,7 @@ struct BrowserView: View {
                 .textFieldStyle(.plain)
                 .font(CF.ui(14))
                 .foregroundColor(CF.text1)
-                .frame(width: 190)
+                .frame(width: 160)
         }
         .padding(.horizontal, 12)
         .frame(height: 38)
@@ -99,6 +111,37 @@ struct BrowserView: View {
             RoundedRectangle(cornerRadius: CF.radiusSmall)
                 .stroke(CF.line, lineWidth: 1)
         )
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            ForEach(SortMode.allCases) { mode in
+                Button {
+                    app.sortMode = mode
+                } label: {
+                    if app.sortMode == mode {
+                        Label(mode.label, systemImage: "checkmark")
+                    } else {
+                        Text(mode.label)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 11, weight: .medium))
+                Text(app.sortMode.label)
+                    .font(CF.ui(CF.fontSmall))
+            }
+            .foregroundColor(CF.text2)
+            .padding(.horizontal, 10)
+            .frame(height: 38)
+            .background(RoundedRectangle(cornerRadius: CF.radiusSmall).fill(CF.bg0))
+            .overlay(
+                RoundedRectangle(cornerRadius: CF.radiusSmall)
+                    .stroke(CF.line, lineWidth: 1)
+            )
+        }
     }
 
     private var columnsPicker: some View {
@@ -138,7 +181,7 @@ struct BrowserView: View {
                 LazyVGrid(columns: gridItems, alignment: .leading, spacing: CF.gap) {
                     ForEach(app.filteredEntries) { entry in
                         Button {
-                            app.play(entry)
+                            app.activate(entry)
                         } label: {
                             VideoCard(entry: entry)
                         }

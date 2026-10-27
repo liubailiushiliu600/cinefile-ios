@@ -23,7 +23,7 @@ final class ThumbnailService: @unchecked Sendable {
     }
 
     func thumbnail(for entry: Entry) async -> UIImage? {
-        guard !entry.isDirectory else { return nil }
+        guard !entry.isDirectory, let url = entry.localURL else { return nil }
         let key = Self.key(for: entry)
 
         if let cached = cachedImage(key) { return cached }
@@ -34,7 +34,6 @@ final class ThumbnailService: @unchecked Sendable {
             return image
         }
 
-        let url = entry.url
         let image = await Task.detached(priority: .utility) {
             Self.generate(url: url)
         }.value
@@ -63,7 +62,7 @@ final class ThumbnailService: @unchecked Sendable {
     }
 
     static func key(for entry: Entry) -> String {
-        let material = "\(entry.url.path)|\(entry.mtime.timeIntervalSince1970)|\(entry.size)|thumb-v1"
+        let material = "\(entry.id)|\(entry.mtime.timeIntervalSince1970)|\(entry.size)|thumb-v1"
         let digest = SHA256.hash(data: Data(material.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }

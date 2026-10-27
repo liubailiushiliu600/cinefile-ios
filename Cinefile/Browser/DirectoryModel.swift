@@ -1,13 +1,39 @@
 import Foundation
 
-/// One row in the browser: a folder or a playable video file.
+/// One row in the browser. A folder or a video, either on this device or on a
+/// paired peer's SMB share. The browser, grid, sorting and player all work on
+/// this single type, so a network library behaves exactly like a local folder.
 struct Entry: Identifiable, Hashable, Sendable {
+    enum Location: Hashable, Sendable {
+        case local(URL)
+        case remote(path: String)
+    }
+
     let id: String
     let name: String
-    let url: URL
+    let location: Location
     let isDirectory: Bool
     let size: Int64
     let mtime: Date
+
+    var isRemote: Bool {
+        if case .remote = location { return true }
+        return false
+    }
+
+    var localURL: URL? {
+        if case .local(let url) = location { return url }
+        return nil
+    }
+
+    var remotePath: String? {
+        if case .remote(let path) = location { return path }
+        return nil
+    }
+
+    var fileExtension: String {
+        (name as NSString).pathExtension.lowercased()
+    }
 
     var displaySize: String {
         guard !isDirectory else { return "" }
@@ -26,6 +52,41 @@ struct Entry: Identifiable, Hashable, Sendable {
             value /= 1024
         }
         return String(format: "%.1f TB", value)
+    }
+}
+
+/// Sort order, matching the desktop toolbar (name / date / size, folders first).
+enum SortMode: String, CaseIterable, Identifiable {
+    case name
+    case date
+    case size
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .name: return "按文件名"
+        case .date: return "最近修改"
+        case .size: return "文件大小"
+        }
+    }
+}
+
+extension Array where Element == Entry {
+    func sortedByMode(_ mode: SortMode) -> [Entry] {
+        sorted { lhs, rhs in
+            if lhs.isDirectory != rhs.isDirectory { return lhs.isDirectory }
+            switch mode {
+            case .name:
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            case .date:
+                if lhs.mtime != rhs.mtime { return lhs.mtime > rhs.mtime }
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            case .size:
+                if lhs.size != rhs.size { return lhs.size > rhs.size }
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            }
+        }
     }
 }
 
@@ -74,9 +135,9 @@ enum DirectoryLister {
 
             entries.append(
                 Entry(
-                    id: url.standardizedFileURL.path,
+                    id: "local:\(url.standardizedFileURL.path)",
                     name: name,
-                    url: url,
+                    location: .local(url),
                     isDirectory: isDirectory,
                     size: Int64(values?.fileSize ?? 0),
                     mtime: values?.contentModificationDate ?? .distantPast
@@ -89,11 +150,6 @@ enum DirectoryLister {
             return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
         return entries
-    }
-
-    /// Immediate child folders of a folder (used by the sidebar tree).
-    static func subfolders(_ folder: URL) -> [Entry] {
-        (try? list(folder))?.filter { $0.isDirectory } ?? []
     }
 }
 

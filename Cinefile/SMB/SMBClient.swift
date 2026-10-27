@@ -7,6 +7,7 @@ struct SMBEntry: Identifiable, Hashable, Sendable {
     let path: String
     let isDirectory: Bool
     let size: Int64
+    let mtime: Date
 
     var id: String { path }
 }
@@ -40,8 +41,7 @@ final class SMBClient: @unchecked Sendable {
 
     /// List a path relative to the share root ("" = share root).
     func list(_ relativePath: String) async throws -> [SMBEntry] {
-        let trimmed = relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let path = trimmed.isEmpty ? "/" : "/\(trimmed)"
+        let path = fullPath(relativePath)
         let items = try await manager.contentsOfDirectory(atPath: path)
 
         var entries: [SMBEntry] = []
@@ -53,12 +53,14 @@ final class SMBClient: @unchecked Sendable {
             let resourceType = item[.fileResourceTypeKey] as? URLFileResourceType
             let isDirectory = resourceType == .directory
             let size = (item[.fileSizeKey] as? NSNumber)?.int64Value ?? 0
+            let modified = (item[.contentModificationDateKey] as? Date) ?? .distantPast
             entries.append(
                 SMBEntry(
                     name: name,
-                    path: trimmed.isEmpty ? name : "\(trimmed)/\(name)",
+                    path: relativePath.isEmpty ? name : "\(relativePath)/\(name)",
                     isDirectory: isDirectory,
-                    size: size
+                    size: size,
+                    mtime: modified
                 )
             )
         }
@@ -68,6 +70,16 @@ final class SMBClient: @unchecked Sendable {
             return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
         return entries
+    }
+
+    /// Read a whole file (used by the connection speed test on small samples).
+    func read(_ relativePath: String) async throws -> Data {
+        try await manager.contents(atPath: fullPath(relativePath))
+    }
+
+    private func fullPath(_ relativePath: String) -> String {
+        let trimmed = relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return trimmed.isEmpty ? "/" : "/\(trimmed)"
     }
 }
 
