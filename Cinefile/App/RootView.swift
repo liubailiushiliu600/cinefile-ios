@@ -9,6 +9,7 @@ struct RootView: View {
     @State private var showPicker = false
     @State private var showSpeedTest = false
     @State private var showDevices = false
+    @State private var openPeer: PairedPeer?
 
     var body: some View {
         GeometryReader { geo in
@@ -16,7 +17,9 @@ struct RootView: View {
                 SidebarView(
                     showPicker: $showPicker,
                     showSpeedTest: $showSpeedTest,
-                    showDevices: $showDevices
+                    showDevices: $showDevices,
+                    peers: peers,
+                    openPeer: $openPeer
                 )
                     .frame(width: geo.size.width < 780 ? 248 : 300)
 
@@ -67,6 +70,16 @@ struct RootView: View {
                 .environmentObject(peers)
                 .preferredColorScheme(.dark)
         }
+        .sheet(item: $openPeer) { peer in
+            if let access = peers.access(for: peer) {
+                SMBBrowserView(peer: peer, access: access)
+                    .preferredColorScheme(.dark)
+            } else {
+                Text("缺少这台设备的 SMB 凭据，请重新配对。")
+                    .padding(40)
+                    .background(CF.bg0)
+            }
+        }
         .fullScreenCover(item: $app.playingEntry) { entry in
             PlayerScreen(url: entry.url, title: entry.name, subtitle: entry.displaySize)
                 .preferredColorScheme(.dark)
@@ -90,6 +103,8 @@ struct SidebarView: View {
     @Binding var showPicker: Bool
     @Binding var showSpeedTest: Bool
     @Binding var showDevices: Bool
+    @ObservedObject var peers: PeerService
+    @Binding var openPeer: PairedPeer?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -99,6 +114,7 @@ struct SidebarView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     librarySection
+                    networkSection
                     if app.currentLibrary != nil {
                         folderSection
                     }
@@ -206,6 +222,53 @@ struct SidebarView: View {
                 Label("从片库移除", systemImage: "trash")
             }
         }
+    }
+
+    private var networkSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Eyebrow(text: "Network · 网络片库")
+            if peers.paired.isEmpty {
+                Text("配对 PC 后，对方的片库会出现在这里。")
+                    .font(CF.ui(CF.fontSmall))
+                    .foregroundColor(CF.text3)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(peers.paired) { peer in
+                    networkRow(peer)
+                }
+            }
+        }
+    }
+
+    private func networkRow(_ peer: PairedPeer) -> some View {
+        let online = peers.isOnline(peer)
+        return Button {
+            openPeer = peer
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "network")
+                    .font(.system(size: 14))
+                    .foregroundColor(online ? CF.accent : CF.text3)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(peer.hostname)
+                        .font(CF.ui(14, weight: .medium))
+                        .foregroundColor(CF.text1)
+                        .lineLimit(1)
+                    Text(peer.shareLabel.isEmpty ? "网络共享" : peer.shareLabel)
+                        .font(CF.mono(CF.fontCaption))
+                        .foregroundColor(CF.text3)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Circle()
+                    .fill(online ? CF.success : CF.text3)
+                    .frame(width: 6, height: 6)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 46)
+            .background(RoundedRectangle(cornerRadius: CF.radiusSmall).fill(CF.bg2))
+        }
+        .buttonStyle(.plain)
     }
 
     private var folderSection: some View {
