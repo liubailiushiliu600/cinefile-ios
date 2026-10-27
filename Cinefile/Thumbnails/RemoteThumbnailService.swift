@@ -4,10 +4,6 @@ import Foundation
 import MobileVLCKit
 import UIKit
 
-/// Caps parallel FFmpeg decodes so a folder does not spawn ten at once.
-/// File-scope (not actor-isolated) because it is waited on a GCD queue.
-private let ffmpegGate = DispatchSemaphore(value: 1)
-
 /// Below this much free memory we stop starting new captures. A VLC instance
 /// costs 100–300 MB (it keeps demux caches), which OOMs a 3 GB iPad quickly.
 private let minimumFreeMemory: UInt64 = 260 * 1024 * 1024
@@ -59,7 +55,7 @@ final class RemoteThumbnailService {
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
     }
 
-    func thumbnail(for entry: Entry, client: SMBClient, access: SMBAccess) async -> UIImage? {
+    func thumbnail(for entry: Entry, access: SMBAccess) async -> UIImage? {
         guard let path = entry.remotePath, let url = access.playbackURL(relativePath: path) else {
             return nil
         }
@@ -69,26 +65,6 @@ final class RemoteThumbnailService {
             return image
         }
 
-        // Fast path: FFmpeg decodes exactly one frame (Infuse-style). Run it on
-        // a GCD queue: the AVIO read blocks, and DispatchSemaphore.wait is not
-        // allowed directly inside an async context.
-        let extracted: UIImage? = await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                ffmpegGate.wait()
-                defer { ffmpegGate.signal() }
-                let image = client.extractThumbnail(relativePath: path, fileSize: entry.size, at: 3.0)
-                continuation.resume(returning: image)
-            }
-        }
-
-        if let extracted {
-            if let data = extracted.jpegData(compressionQuality: 0.72) {
-                try? data.write(to: destination, options: .atomic)
-            }
-            return extracted
-        }
-
-        // Fallback: VLC play-and-snapshot queue.
         return await withCheckedContinuation { continuation in
             // Do not let fast scrolling pile up hundreds of jobs.
             if queue.count >= 60 {

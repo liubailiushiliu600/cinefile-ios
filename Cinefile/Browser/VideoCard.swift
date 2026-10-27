@@ -22,8 +22,8 @@ struct VideoCard: View {
             guard !entry.isDirectory else { return }
 
             if entry.isRemote {
-                guard let client = app.activeSMBClient, let access = app.activeSMBAccess else { return }
-                if let loaded = await RemoteThumbnailService.shared.thumbnail(for: entry, client: client, access: access) {
+                guard let access = app.activeSMBAccess else { return }
+                if let loaded = await RemoteThumbnailService.shared.thumbnail(for: entry, access: access) {
                     image = loaded
                 } else {
                     failed = true

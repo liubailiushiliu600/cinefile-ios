@@ -1,6 +1,5 @@
 import AMSMB2
 import Foundation
-import UIKit
 
 /// One entry inside a paired peer's SMB share.
 struct SMBEntry: Identifiable, Hashable, Sendable {
@@ -76,17 +75,6 @@ final class SMBClient: @unchecked Sendable {
     /// Read a whole file (used by the connection speed test on small samples).
     func read(_ relativePath: String) async throws -> Data {
         try await manager.contents(atPath: fullPath(relativePath))
-    }
-
-    /// Single-frame decode through FFmpeg (Infuse-style). Blocking: call from a
-    /// background task. Returns nil when the container/codec is unsupported.
-    func extractThumbnail(relativePath: String, fileSize: Int64, at seconds: Double) -> UIImage? {
-        FFmpegFrameExtractor.extract(
-            manager: manager,
-            path: fullPath(relativePath),
-            fileSize: fileSize,
-            at: seconds
-        )
     }
 
     private func fullPath(_ relativePath: String) -> String {
