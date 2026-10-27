@@ -22,13 +22,22 @@ enum Discovery {
 
     static func scan(timeout: TimeInterval = 2.5, attempts: Int = 2) async -> [PeerBeacon] {
         await Task.detached(priority: .userInitiated) {
-            scanSync(timeout: timeout, attempts: attempts)
+            runQuery(destination: nil, timeout: timeout, attempts: attempts)
+        }.value
+    }
+
+    /// Unicast query to one host (manual add). Works even when the Wi-Fi blocks
+    /// broadcast or multicast: the desktop responder binds 0.0.0.0:45990 and
+    /// answers unicast packets as well, so this is the reliable fallback.
+    static func probe(host: String, timeout: TimeInterval = 2.2, attempts: Int = 2) async -> PeerBeacon? {
+        await Task.detached(priority: .userInitiated) {
+            runQuery(destination: host, timeout: timeout, attempts: attempts).first
         }.value
     }
 
     // MARK: - Query
 
-    private static func scanSync(timeout: TimeInterval, attempts: Int) -> [PeerBeacon] {
+    private static func runQuery(destination: String?, timeout: TimeInterval, attempts: Int) -> [PeerBeacon] {
         let privateKey = Curve25519.KeyAgreement.PrivateKey()
         let publicKey = privateKey.publicKey.rawRepresentation
         let queryId = randomHex(16)
@@ -70,11 +79,24 @@ enum Discovery {
         }
         guard bound == 0 else { return [] }
 
-        var destination = sockaddr_in()
-        destination.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        destination.sin_family = sa_family_t(AF_INET)
-        destination.sin_port = port.bigEndian
-        destination.sin_addr.s_addr = inet_addr("255.255.255.255")
+        // 255.255.255.255 is a limited broadcast and is often dropped by APs or
+        // host firewalls; directed subnet broadcasts (192.168.x.255) are far
+        // more reliable, so query both.
+        var targets: [in_addr] = []
+        if let destination, !destination.isEmpty {
+            var address = in_addr()
+            inet_pton(AF_INET, destination, &address)
+            targets = [address]
+        } else {
+            targets = broadcastTargets()
+        }
+        guard !targets.isEmpty else { return [] }
+
+        var base = sockaddr_in()
+        base.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        base.sin_family = sa_family_t(AF_INET)
+        base.sin_port = port.bigEndian
+        base.sin_addr = targets[0]
 
         var found: [String: PeerBeacon] = [:]
         var buffer = [UInt8](repeating: 0, count: 16384)
@@ -84,17 +106,21 @@ enum Discovery {
 
         while Date() < deadline {
             if sent < attempts, Date() >= nextSend {
-                _ = withUnsafePointer(to: &destination) { pointer in
-                    pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { address in
-                        packet.withUnsafeBytes { raw in
-                            sendto(
-                                descriptor,
-                                raw.baseAddress,
-                                packet.count,
-                                0,
-                                address,
-                                socklen_t(MemoryLayout<sockaddr_in>.size)
-                            )
+                for address in targets {
+                    var destinationAddress = base
+                    destinationAddress.sin_addr = address
+                    _ = withUnsafePointer(to: &destinationAddress) { pointer in
+                        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                            packet.withUnsafeBytes { raw in
+                                sendto(
+                                    descriptor,
+                                    raw.baseAddress,
+                                    packet.count,
+                                    0,
+                                    sockaddrPointer,
+                                    socklen_t(MemoryLayout<sockaddr_in>.size)
+                                )
+                            }
                         }
                     }
                 }
@@ -197,6 +223,54 @@ enum Discovery {
     }
 
     // MARK: - Helpers
+
+    /// Limited broadcast plus every active IPv4 interface's directed broadcast
+    /// (e.g. 192.168.1.255), de-duplicated.
+    private static func broadcastTargets() -> [in_addr] {
+        var results: [in_addr] = []
+        var seen = Set<String>()
+
+        func append(_ address: in_addr, _ label: String) {
+            guard !label.isEmpty, label != "0.0.0.0", !seen.contains(label) else { return }
+            seen.insert(label)
+            results.append(address)
+        }
+
+        var limited = in_addr()
+        inet_pton(AF_INET, "255.255.255.255", &limited)
+        append(limited, "255.255.255.255")
+
+        var interfaces: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&interfaces) == 0 else { return results }
+        defer { freeifaddrs(interfaces) }
+
+        var cursor = interfaces
+        while let current = cursor {
+            let interface = current.pointee
+            cursor = interface.ifa_next
+
+            guard let addressPointer = interface.ifa_addr else { continue }
+            guard addressPointer.pointee.sa_family == UInt8(AF_INET) else { continue }
+
+            let flags = Int32(bitPattern: interface.ifa_flags)
+            guard
+                (flags & IFF_UP) != 0,
+                (flags & IFF_LOOPBACK) == 0,
+                (flags & IFF_BROADCAST) != 0,
+                let destinationPointer = interface.ifa_dstaddr
+            else {
+                continue
+            }
+
+            var address = destinationPointer
+                .withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
+            var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+            inet_ntop(AF_INET, &address, &buffer, socklen_t(INET_ADDRSTRLEN))
+            append(address, String(cString: buffer))
+        }
+
+        return results
+    }
 
     private static func ipString(_ address: sockaddr_in) -> String {
         var raw = address.sin_addr

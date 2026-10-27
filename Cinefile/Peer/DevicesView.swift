@@ -7,6 +7,10 @@ struct DevicesView: View {
 
     @State private var pairingTarget: PeerBeacon?
     @State private var openPeer: PairedPeer?
+    @State private var showManual = false
+    @State private var manualHost = ""
+    @State private var manualBusy = false
+    @State private var manualError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -27,6 +31,10 @@ struct DevicesView: View {
         .sheet(item: $pairingTarget) { beacon in
             PairingSheet(beacon: beacon)
                 .environmentObject(peers)
+                .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showManual) {
+            manualSheet
                 .preferredColorScheme(.dark)
         }
         .sheet(item: $openPeer) { peer in
@@ -66,23 +74,108 @@ struct DevicesView: View {
     }
 
     private var statusRow: some View {
-        HStack(spacing: 12) {
-            Button {
-                Task { await peers.scan() }
-            } label: {
-                Label(peers.isScanning ? "扫描中…" : "扫描局域网", systemImage: "antenna.radiowaves.left.and.right")
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Button {
+                    Task { await peers.scan() }
+                } label: {
+                    Label(peers.isScanning ? "扫描中…" : "扫描局域网", systemImage: "antenna.radiowaves.left.and.right")
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                }
+                .buttonStyle(CFButtonStyle(primary: true))
+                .disabled(peers.isScanning)
+
+                Button {
+                    manualHost = ""
+                    manualError = nil
+                    showManual = true
+                } label: {
+                    Label("手动添加 IP", systemImage: "keyboard")
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                }
+                .buttonStyle(CFButtonStyle())
+
+                Spacer(minLength: 0)
             }
-            .buttonStyle(CFButtonStyle(primary: true))
-            .disabled(peers.isScanning)
 
             Text(peers.statusText)
                 .font(CF.ui(CF.fontSmall))
                 .foregroundColor(peers.lastError == nil ? CF.text3 : CF.danger)
-                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
 
-            Spacer(minLength: 0)
+    private var manualSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("手动添加设备")
+                .font(CF.ui(22, weight: .semibold))
+                .foregroundColor(CF.text1)
+
+            Text("在 PC 上运行 ipconfig，找到「IPv4 地址」填在这里。这种方式直接单播查询，不依赖广播/组播，适合 Wi-Fi 屏蔽组播的网络。")
+                .font(CF.ui(CF.fontSmall))
+                .foregroundColor(CF.text3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextField("192.168.1.10", text: $manualHost)
+                .textFieldStyle(.plain)
+                .font(CF.mono(18))
+                .foregroundColor(CF.text1)
+                .keyboardType(.numbersAndPunctuation)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .padding(.horizontal, 12)
+                .frame(height: 44)
+                .background(RoundedRectangle(cornerRadius: CF.radiusSmall).fill(CF.bg2))
+
+            if let manualError {
+                Text(manualError)
+                    .font(CF.ui(CF.fontSmall))
+                    .foregroundColor(CF.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    Task { await manualProbe() }
+                } label: {
+                    Text(manualBusy ? "查找中…" : "查找并配对")
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                }
+                .buttonStyle(CFButtonStyle(primary: true))
+                .disabled(manualBusy)
+
+                Button("取消") { showManual = false }
+                    .buttonStyle(CFButtonStyle())
+                    .disabled(manualBusy)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 480, minHeight: 320, alignment: .topLeading)
+        .background(CF.bg0)
+    }
+
+    private func manualProbe() async {
+        let host = manualHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else {
+            manualError = "请输入 PC 的 IPv4 地址。"
+            return
+        }
+        manualBusy = true
+        manualError = nil
+
+        if let beacon = await Discovery.probe(host: host) {
+            if !peers.discovered.contains(where: { $0.instanceId == beacon.instanceId }) {
+                peers.discovered.append(beacon)
+            }
+            manualBusy = false
+            showManual = false
+            pairingTarget = beacon
+        } else {
+            manualError = "没有收到回应。请确认：① PC 端 Cinefile 正在运行；② Windows 防火墙允许 UDP 45990；③ 两台设备在同一 Wi-Fi（不是访客网络）；④ 填的是 PC 的局域网 IPv4 地址。"
+            manualBusy = false
         }
     }
 
