@@ -6,6 +6,7 @@ import UIKit
 struct VideoCard: View {
     let entry: Entry
 
+    @EnvironmentObject private var app: AppState
     @State private var image: UIImage?
     @State private var failed = false
 
@@ -19,7 +20,15 @@ struct VideoCard: View {
         .contentShape(RoundedRectangle(cornerRadius: CF.radius))
         .task(id: entry.id) {
             guard !entry.isDirectory else { return }
-            if let loaded = await ThumbnailService.shared.thumbnail(for: entry) {
+
+            if entry.isRemote {
+                guard let access = app.activeSMBAccess else { return }
+                if let loaded = await RemoteThumbnailService.shared.thumbnail(for: entry, access: access) {
+                    image = loaded
+                } else {
+                    failed = true
+                }
+            } else if let loaded = await ThumbnailService.shared.thumbnail(for: entry) {
                 image = loaded
             } else {
                 failed = true
@@ -41,8 +50,8 @@ struct VideoCard: View {
                     .font(.system(size: 34, weight: .light))
                     .foregroundColor(CF.text3.opacity(0.65))
             } else if entry.isRemote {
-                // SMB thumbnails need a decode pass; show a clean format plate
-                // instead of a spinner that never resolves.
+                // SMB thumbnails are decoded by briefly playing the file, so
+                // show a format plate with a small spinner until the frame lands.
                 VStack(spacing: 7) {
                     Image(systemName: "film")
                         .font(.system(size: 30, weight: .light))
@@ -50,6 +59,14 @@ struct VideoCard: View {
                         .font(CF.mono(11, weight: .medium))
                 }
                 .foregroundColor(CF.text3)
+                .overlay(alignment: .bottomTrailing) {
+                    if !failed {
+                        ProgressView()
+                            .scaleEffect(0.55)
+                            .tint(CF.text3)
+                            .padding(8)
+                    }
+                }
             } else if failed {
                 Image(systemName: "film")
                     .font(.system(size: 30, weight: .light))
