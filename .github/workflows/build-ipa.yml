@@ -49,6 +49,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/Payload"
           cp -R "$APP" "$RUNNER_TEMP/Payload/"
           cd "$RUNNER_TEMP"
+          # Prebuilt frameworks (FFmpegKit) ship their own _CodeSignature; ldid
+          # re-signing the binary afterwards makes the bundle inconsistent and
+          # dyld refuses to load it. Drop the stale signature first.
+          find "Payload/Cinefile.app" -maxdepth 4 -name "_CodeSignature" -type d -exec rm -rf {} + 2>/dev/null || true
+
           # Pre-sign every Mach-O (app + embedded frameworks) so TrollStore
           # installs a consistent bundle and MobileVLCKit loads.
           if [ -f "$GITHUB_WORKSPACE/Cinefile.entitlements" ]; then
