@@ -138,7 +138,7 @@ enum FFmpegFrameExtractor {
 
         let outWidth = maxWidth
         let outHeight = max(1, Int32(Double(height) * Double(maxWidth) / Double(width)))
-        let pixelFormat = AVPixelFormat(rawValue: UInt32(frame.pointee.format))
+        let pixelFormat = AVPixelFormat(rawValue: frame.pointee.format)
 
         guard let scaler = sws_getContext(
             width,
@@ -147,7 +147,7 @@ enum FFmpegFrameExtractor {
             outWidth,
             outHeight,
             AV_PIX_FMT_RGB24,
-            SWS_BILINEAR,
+            SWS_BILINEAR.rawValue,
             nil,
             nil,
             nil

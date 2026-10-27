@@ -3,6 +3,10 @@ import Foundation
 import MobileVLCKit
 import UIKit
 
+/// Caps parallel FFmpeg decodes so a folder does not spawn ten at once.
+/// File-scope (not actor-isolated) because it is waited on a GCD queue.
+private let ffmpegGate = DispatchSemaphore(value: 2)
+
 /// Thumbnails for files on a paired peer's SMB share.
 ///
 /// AVFoundation cannot open `smb://`, so this service briefly plays the file
@@ -41,8 +45,6 @@ final class RemoteThumbnailService {
     private var sessions: [UUID: Session] = [:]
     private let maxConcurrent = 2
     private let cacheDirectory: URL
-    /// Caps parallel FFmpeg decodes so a folder does not spawn 10 at once.
-    private static let ffmpegGate = DispatchSemaphore(value: 2)
 
     private init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -60,12 +62,17 @@ final class RemoteThumbnailService {
             return image
         }
 
-        // Fast path: FFmpeg decodes exactly one frame (Infuse-style).
-        let extracted = await Task.detached(priority: .utility) {
-            Self.ffmpegGate.wait()
-            defer { Self.ffmpegGate.signal() }
-            return client.extractThumbnail(relativePath: path, fileSize: entry.size, at: 3.0)
-        }.value
+        // Fast path: FFmpeg decodes exactly one frame (Infuse-style). Run it on
+        // a GCD queue: the AVIO read blocks, and DispatchSemaphore.wait is not
+        // allowed directly inside an async context.
+        let extracted: UIImage? = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                ffmpegGate.wait()
+                defer { ffmpegGate.signal() }
+                let image = client.extractThumbnail(relativePath: path, fileSize: entry.size, at: 3.0)
+                continuation.resume(returning: image)
+            }
+        }
 
         if let extracted {
             if let data = extracted.jpegData(compressionQuality: 0.72) {
