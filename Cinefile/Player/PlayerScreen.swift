@@ -33,10 +33,12 @@ struct PlayerScreen: View {
         }
         .statusBarHidden(true)
         .onAppear {
+            PlaybackActivity.shared.begin()
             vm.open(url)
             scheduleHide()
         }
         .onDisappear {
+            PlaybackActivity.shared.end()
             hideTask?.cancel()
             vm.stop()
         }

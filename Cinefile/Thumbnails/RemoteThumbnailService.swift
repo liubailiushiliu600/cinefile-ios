@@ -63,26 +63,56 @@ final class RemoteThumbnailService {
 
     private func pump() {
         guard !busy, !queue.isEmpty else { return }
+        // Never generate while the user is watching something.
+        guard !PlaybackActivity.shared.isPlaying else { return }
         busy = true
         let job = queue.removeFirst()
         activeJob = job
         start(job)
     }
 
+    /// Stop the current capture and put its job back at the head of the queue.
+    func pauseForPlayback() {
+        guard busy else { return }
+        timer?.invalidate()
+        timer = nil
+        player?.stop()
+        surface?.removeFromSuperview()
+        surface = nil
+        player = nil
+        deadline = nil
+        busy = false
+        if let job = activeJob {
+            queue.insert(job, at: 0)
+        }
+        activeJob = nil
+    }
+
+    func resumeAfterPlayback() {
+        pump()
+    }
+
     private func start(_ job: Job) {
         let player = VLCMediaPlayer()
         let view = makeSurface()
         player.drawable = view
-        player.media = VLCMedia(url: job.url)
+
+        // Jump straight to the capture point instead of decoding from zero, and
+        // skip audio entirely — this is the difference between ~1s and ~6s per
+        // frame. (Infuse-class apps decode a single frame with FFmpeg; VLC only
+        // offers play-and-snapshot, so seek-to-start is the equivalent trick.)
+        let media = VLCMedia(url: job.url)
+        media.addOption(":start-time=3")
+        media.addOption(":no-audio")
+        player.media = media
         player.play()
-        player.audio?.isMuted = true
 
         self.player = player
         self.surface = view
-        self.deadline = Date().addingTimeInterval(12)
+        self.deadline = Date().addingTimeInterval(8)
 
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.tick()
             }
@@ -92,7 +122,7 @@ final class RemoteThumbnailService {
     private func tick() {
         guard let player, let deadline else { return }
         let seconds = Double(player.time.intValue) / 1000.0
-        if seconds >= 3.0 || Date() > deadline {
+        if seconds >= 3.4 || Date() > deadline {
             finish()
         }
     }
@@ -106,7 +136,7 @@ final class RemoteThumbnailService {
         try? FileManager.default.removeItem(at: destination)
         player.saveVideoSnapshot(at: destination.path, withWidth: 640, andHeight: 360)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self else { return }
             let image = (try? Data(contentsOf: destination)).flatMap { UIImage(data: $0) }
             player.stop()
@@ -126,7 +156,7 @@ final class RemoteThumbnailService {
     private func makeSurface() -> UIView {
         // Must sit inside the window (not off-screen) or VLC will not create a
         // video output; alpha 0.02 keeps it invisible to the user.
-        let view = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 180))
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 160, height: 90))
         view.backgroundColor = .black
         view.alpha = 0.02
         view.isUserInteractionEnabled = false
