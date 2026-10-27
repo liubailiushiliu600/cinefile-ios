@@ -10,6 +10,12 @@ packages:
   AMSMB2:
     url: https://github.com/amosavian/AMSMB2
     from: "3.0.0"
+  # Prebuilt FFmpeg (static Libav*) used only for single-frame thumbnail
+  # extraction. MPVKit only ships an aggregate product that would duplicate
+  # libmpv, so this fork's standalone Libav products are used instead.
+  FFmpegKit:
+    url: https://github.com/kingslay/FFmpegKit
+    from: "9.0.2"
 
 settings:
   base:
@@ -33,6 +39,14 @@ targets:
       # and dyld aborts at launch (TrollStore shows the app crashing instantly).
       - package: AMSMB2
         embed: true
+      - package: FFmpegKit
+        product: Libavcodec
+      - package: FFmpegKit
+        product: Libavformat
+      - package: FFmpegKit
+        product: Libavutil
+      - package: FFmpegKit
+        product: Libswscale
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.cinefile.ios

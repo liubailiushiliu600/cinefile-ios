@@ -41,6 +41,8 @@ final class RemoteThumbnailService {
     private var sessions: [UUID: Session] = [:]
     private let maxConcurrent = 2
     private let cacheDirectory: URL
+    /// Caps parallel FFmpeg decodes so a folder does not spawn 10 at once.
+    private static let ffmpegGate = DispatchSemaphore(value: 2)
 
     private init() {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -48,7 +50,7 @@ final class RemoteThumbnailService {
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
     }
 
-    func thumbnail(for entry: Entry, access: SMBAccess) async -> UIImage? {
+    func thumbnail(for entry: Entry, client: SMBClient, access: SMBAccess) async -> UIImage? {
         guard let path = entry.remotePath, let url = access.playbackURL(relativePath: path) else {
             return nil
         }
@@ -58,6 +60,21 @@ final class RemoteThumbnailService {
             return image
         }
 
+        // Fast path: FFmpeg decodes exactly one frame (Infuse-style).
+        let extracted = await Task.detached(priority: .utility) {
+            Self.ffmpegGate.wait()
+            defer { Self.ffmpegGate.signal() }
+            return client.extractThumbnail(relativePath: path, fileSize: entry.size, at: 3.0)
+        }.value
+
+        if let extracted {
+            if let data = extracted.jpegData(compressionQuality: 0.72) {
+                try? data.write(to: destination, options: .atomic)
+            }
+            return extracted
+        }
+
+        // Fallback: VLC play-and-snapshot queue.
         return await withCheckedContinuation { continuation in
             // Do not let fast scrolling pile up hundreds of jobs.
             if queue.count >= 60 {
