@@ -147,7 +147,7 @@ enum FFmpegFrameExtractor {
             outWidth,
             outHeight,
             AV_PIX_FMT_RGB24,
-            SWS_BILINEAR.rawValue,
+            Int32(bitPattern: SWS_BILINEAR.rawValue),
             nil,
             nil,
             nil
