@@ -8,9 +8,6 @@ target 'Cinefile' do
   # hardware decoding, subtitle and audio track switching.
   pod 'MobileVLCKit', '~> 3.6'
 
-  # SMB browsing (libsmb2). Declared dynamic upstream, so it MUST be embedded:
-  # a bare SPM package dependency links @rpath/AMSMB2.framework but never
-  # embeds it, which makes dyld abort at launch. It is not on the CocoaPods
-  # trunk, so pull the podspec from the repository itself.
-  pod 'AMSMB2', :git => 'https://github.com/amosavian/AMSMB2.git', :branch => 'master'
+  # AMSMB2 is a SwiftPM package (no podspec); it is declared in project.yml
+  # with embed: true so the dynamic framework lands in Frameworks/.
 end

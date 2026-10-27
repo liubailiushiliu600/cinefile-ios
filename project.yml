@@ -6,6 +6,11 @@ options:
   createIntermediateGroups: true
   groupSortPosition: top
 
+packages:
+  AMSMB2:
+    url: https://github.com/amosavian/AMSMB2
+    from: "3.0.0"
+
 settings:
   base:
     SWIFT_VERSION: "5.9"
@@ -22,6 +27,12 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: Cinefile
+    dependencies:
+      # AMSMB2 declares a dynamic library upstream. Without embed: true Xcode
+      # links @rpath/AMSMB2.framework but never copies it into the app bundle,
+      # and dyld aborts at launch (TrollStore shows the app crashing instantly).
+      - package: AMSMB2
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.cinefile.ios
