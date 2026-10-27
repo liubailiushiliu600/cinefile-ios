@@ -63,6 +63,26 @@ jobs:
           find "Payload/Cinefile.app" -maxdepth 4 -name "*.dylib" | while read -r lib; do
             ldid -S "$lib" || true
           done
+
+          # Fail the build if the app links an @rpath framework that was not
+          # embedded — that is exactly what makes TrollStore installs crash on
+          # launch (dyld: Library not loaded).
+          echo "--- embedded framework check ---"
+          MISSING=0
+          for dep in $(otool -L "Payload/Cinefile.app/Cinefile" | grep -o '@rpath/[^ ]*' | sort -u); do
+            rel="${dep#@rpath/}"
+            if [ -f "Payload/Cinefile.app/Frameworks/$rel" ]; then
+              echo "OK: $dep"
+            else
+              echo "MISSING: $dep"
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -ne 0 ]; then
+            echo "ERROR: linked frameworks are not embedded; refusing to package"
+            exit 1
+          fi
+
           zip -qry Cinefile-unsigned.ipa Payload
           ls -lh Cinefile-unsigned.ipa
           du -sh "Payload/Cinefile.app"
