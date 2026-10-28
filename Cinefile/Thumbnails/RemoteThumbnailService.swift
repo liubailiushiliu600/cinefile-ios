@@ -83,9 +83,9 @@ final class RemoteThumbnailService {
                 return
             }
             priorityQueue.append(
-                Job(entry: entry, url: url) { image in
+                Job(entry: entry, url: url, completion: { image in
                     continuation.resume(returning: image)
-                }
+                })
             )
             pump()
         }
