@@ -34,7 +34,7 @@ final class RemoteThumbnailService {
         let completion: ((UIImage?) -> Void)?
     }
 
-    private final class Session {
+    private final class Session: @unchecked Sendable {
         let id = UUID()
         let job: Job
         let player: VLCMediaPlayer

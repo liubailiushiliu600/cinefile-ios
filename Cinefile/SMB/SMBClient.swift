@@ -90,15 +90,12 @@ final class SMBClient: @unchecked Sendable {
         return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             let queue = DispatchQueue(label: "app.cinefile.smb.probe")
             let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
+            let guardFlag = ProbeFlag()
 
-            var settled = false
-            let lock = NSLock()
-            func settle(_ value: Bool) {
-                lock.lock()
-                let already = settled
-                settled = true
-                lock.unlock()
-                guard !already else { return }
+            // Must be @Sendable: Network.framework calls the state handler on
+            // its own queue, and Swift 6 would reject a plain nested function.
+            let settle: @Sendable (Bool) -> Void = { value in
+                guard guardFlag.claim() else { return }
                 connection.cancel()
                 continuation.resume(returning: value)
             }
@@ -116,6 +113,20 @@ final class SMBClient: @unchecked Sendable {
             connection.start(queue: queue)
             queue.asyncAfter(deadline: .now() + timeout) { settle(false) }
         }
+    }
+}
+
+/// One-shot flag for the probe above (state handler + timeout race).
+private final class ProbeFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if done { return false }
+        done = true
+        return true
     }
 }
 
