@@ -70,8 +70,12 @@ struct RootView: View {
                 .preferredColorScheme(.dark)
         }
         .fullScreenCover(item: $app.playingRequest) { request in
-            PlayerScreen(url: request.url, title: request.title)
-                .preferredColorScheme(.dark)
+            PlayerScreen(
+                url: request.url,
+                title: request.title,
+                progressKey: request.progressKey
+            )
+            .preferredColorScheme(.dark)
         }
     }
 

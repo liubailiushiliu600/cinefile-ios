@@ -14,8 +14,15 @@ private let minimumFreeMemory: UInt64 = 260 * 1024 * 1024
 /// through VLC on a nearly invisible surface and saves one frame
 /// (`saveVideoSnapshot`). It seeks straight to the capture point
 /// (`:start-time=3`) and disables audio, which is the closest VLC gets to
-/// Infuse-style single-frame decoding. Two captures run in parallel so a folder
-/// fills in about twice as fast; results are cached on disk.
+/// Infuse-style single-frame decoding. Results are cached on disk.
+///
+/// Two queues keep the grid responsive without hammering the network:
+///   * `priorityQueue` — cards that are on screen right now (a caller is
+///     awaiting the image);
+///   * `backgroundQueue` — the rest of the folder, prefetched after the listing
+///     arrives so scrolling and coming back later are instant.
+/// One capture runs at a time; a VLC instance per file is ~100 MB and this app
+/// targets 3 GB iPads.
 @MainActor
 final class RemoteThumbnailService {
     static let shared = RemoteThumbnailService()
@@ -23,7 +30,8 @@ final class RemoteThumbnailService {
     private struct Job {
         let entry: Entry
         let url: URL
-        let completion: (UIImage?) -> Void
+        /// nil for prefetch jobs: nobody is waiting, failures are silent.
+        let completion: ((UIImage?) -> Void)?
     }
 
     private final class Session {
@@ -42,11 +50,13 @@ final class RemoteThumbnailService {
         }
     }
 
-    private var queue: [Job] = []
+    private var priorityQueue: [Job] = []
+    private var backgroundQueue: [Job] = []
     private var sessions: [UUID: Session] = [:]
-    // One VLC capture at a time: each instance is heavy, and this app runs on
-    // 3 GB iPads. FFmpeg handles the fast path anyway.
     private let maxConcurrent = 1
+    /// A folder of 200 films should not queue 200 VLC runs; 48 covers what a
+    /// user actually scrolls through and refills on the next visit.
+    private let maxPrefetch = 48
     private let cacheDirectory: URL
 
     private init() {
@@ -55,29 +65,61 @@ final class RemoteThumbnailService {
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
     }
 
+    // MARK: - Public
+
     func thumbnail(for entry: Entry, access: SMBAccess) async -> UIImage? {
         guard let path = entry.remotePath, let url = access.playbackURL(relativePath: path) else {
             return nil
         }
 
-        let destination = cacheDirectory.appendingPathComponent(Self.key(for: entry) + ".jpg")
-        if let data = try? Data(contentsOf: destination), let image = UIImage(data: data) {
-            return image
+        if let cached = Self.diskImage(for: entry, in: cacheDirectory) {
+            return cached
         }
 
         return await withCheckedContinuation { continuation in
             // Do not let fast scrolling pile up hundreds of jobs.
-            if queue.count >= 60 {
+            if priorityQueue.count >= 60 {
                 continuation.resume(returning: nil)
                 return
             }
-            queue.append(
+            priorityQueue.append(
                 Job(entry: entry, url: url) { image in
                     continuation.resume(returning: image)
                 }
             )
             pump()
         }
+    }
+
+    /// Queue the rest of a freshly listed folder. Called once per directory
+    /// navigation; a new listing replaces whatever was queued before.
+    func prefetch(_ entries: [Entry], access: SMBAccess) {
+        backgroundQueue.removeAll()
+        guard !PlaybackActivity.shared.isPlaying else { return }
+
+        // Skip whatever the on-screen cards are already capturing.
+        var busy = Set(sessions.values.map { Self.key(for: $0.job.entry) })
+        for job in priorityQueue { busy.insert(Self.key(for: job.entry)) }
+
+        var queued = 0
+        for entry in entries {
+            guard queued < maxPrefetch else { break }
+            guard !entry.isDirectory,
+                  let path = entry.remotePath,
+                  let url = access.playbackURL(relativePath: path)
+            else { continue }
+
+            let cacheKey = Self.key(for: entry)
+            if busy.contains(cacheKey) { continue }
+
+            let destination = cacheDirectory.appendingPathComponent(cacheKey + ".jpg")
+            if FileManager.default.fileExists(atPath: destination.path) { continue }
+
+            backgroundQueue.append(Job(entry: entry, url: url, completion: nil))
+            queued += 1
+        }
+
+        pump()
     }
 
     // MARK: - Queue
@@ -95,12 +137,19 @@ final class RemoteThumbnailService {
             return
         }
 
-        while sessions.count < maxConcurrent, !queue.isEmpty {
-            start(queue.removeFirst())
+        while sessions.count < maxConcurrent {
+            if !priorityQueue.isEmpty {
+                start(priorityQueue.removeFirst())
+            } else if !backgroundQueue.isEmpty {
+                start(backgroundQueue.removeFirst())
+            } else {
+                break
+            }
         }
     }
 
-    /// Stop every in-flight capture and put the jobs back at the head.
+    /// Stop every in-flight capture and put the jobs back at the head of their
+    /// queue. On-screen cards keep their waiters, so they are retried first.
     func pauseForPlayback() {
         guard !sessions.isEmpty else { return }
         let jobs = sessions.values.map(\.job)
@@ -111,7 +160,11 @@ final class RemoteThumbnailService {
             session.surface.removeFromSuperview()
         }
         sessions.removeAll()
-        queue.insert(contentsOf: jobs, at: 0)
+
+        let waiting = jobs.filter { $0.completion != nil }
+        let background = jobs.filter { $0.completion == nil }
+        priorityQueue.insert(contentsOf: waiting, at: 0)
+        backgroundQueue.insert(contentsOf: background, at: 0)
     }
 
     func resumeAfterPlayback() {
@@ -161,20 +214,41 @@ final class RemoteThumbnailService {
         session.timer?.invalidate()
         session.timer = nil
 
-        let job = session.job
-        let destination = cacheDirectory.appendingPathComponent(Self.key(for: job.entry) + ".jpg")
+        let destination = cacheDirectory.appendingPathComponent(Self.key(for: session.job.entry) + ".jpg")
         try? FileManager.default.removeItem(at: destination)
         session.player.saveVideoSnapshot(at: destination.path, withWidth: 480, andHeight: 270)
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self else { return }
-            let image = (try? Data(contentsOf: destination)).flatMap { UIImage(data: $0) }
+        // VLC writes the JPEG asynchronously. The previous version waited a
+        // fixed 0.5 s for it; polling at 70 ms lands the same frame most of the
+        // time and cuts the per-thumbnail cost to about a third.
+        deliver(session, attempt: 0)
+    }
+
+    private func deliver(_ session: Session, attempt: Int) {
+        let destination = cacheDirectory.appendingPathComponent(Self.key(for: session.job.entry) + ".jpg")
+        let data = (try? Data(contentsOf: destination)) ?? Data()
+
+        if data.count > 512 || attempt >= 8 {
+            let image = data.isEmpty ? nil : UIImage(data: data)
             session.player.stop()
             session.surface.removeFromSuperview()
-            self.sessions.removeValue(forKey: session.id)
-            job.completion(image)
-            self.pump()
+            sessions.removeValue(forKey: session.id)
+            session.job.completion?(image)
+            pump()
+            return
         }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) { [weak self] in
+            self?.deliver(session, attempt: attempt + 1)
+        }
+    }
+
+    // MARK: - Cache
+
+    private static func diskImage(for entry: Entry, in directory: URL) -> UIImage? {
+        let destination = directory.appendingPathComponent(key(for: entry) + ".jpg")
+        guard let data = try? Data(contentsOf: destination) else { return nil }
+        return UIImage(data: data)
     }
 
     // MARK: - Helpers
@@ -199,8 +273,10 @@ final class RemoteThumbnailService {
             .first { $0.isKeyWindow }
     }
 
+    /// mtime is part of the key: a re-encoded file keeps its name and often its
+    /// size rounded to the gigabyte, but never its timestamp.
     static func key(for entry: Entry) -> String {
-        let material = "\(entry.id)|\(entry.size)|remote-thumb-v1"
+        let material = "\(entry.id)|\(entry.size)|\(entry.mtime.timeIntervalSince1970)|remote-thumb-v2"
         return SHA256.hash(data: Data(material.utf8))
             .map { String(format: "%02x", $0) }
             .joined()

@@ -95,23 +95,10 @@ final class PeerService: ObservableObject {
     }
 
     func access(for peer: PairedPeer) -> SMBAccess? {
-        guard var access = store.access(for: peer.instanceId) else { return nil }
         // The desktop hands over its NetBIOS name (e.g. DESKTOP-9A8R1OB), which
         // iOS cannot resolve — getaddrinfo returns "Can not resolve into
-        // IPv4/v6". Connect by the IPv4 address we actually reached it on.
-        if Self.isIPv4(peer.lastAddress) {
-            access.server = peer.lastAddress
-        }
-        return access
-    }
-
-    private static func isIPv4(_ value: String) -> Bool {
-        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count == 4 else { return false }
-        return parts.allSatisfy { part in
-            guard let number = Int(part) else { return false }
-            return (0...255).contains(number)
-        }
+        // IPv4/v6". PeerStore re-points the record at the IPv4 we reached it on.
+        store.access(for: peer)
     }
 
     func isOnline(_ peer: PairedPeer) -> Bool {

@@ -1,5 +1,6 @@
 import AMSMB2
 import Foundation
+import Network
 
 /// One entry inside a paired peer's SMB share.
 struct SMBEntry: Identifiable, Hashable, Sendable {
@@ -80,6 +81,41 @@ final class SMBClient: @unchecked Sendable {
     private func fullPath(_ relativePath: String) -> String {
         let trimmed = relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return trimmed.isEmpty ? "/" : "/\(trimmed)"
+    }
+
+    /// Cheap TCP probe (445) so restoring a network library at launch does not
+    /// block for a minute when the PC is off or on another Wi-Fi.
+    static func isReachable(host: String, port: UInt16 = 445, timeout: TimeInterval = 1.8) async -> Bool {
+        guard let nwPort = NWEndpoint.Port(rawValue: port) else { return false }
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let queue = DispatchQueue(label: "app.cinefile.smb.probe")
+            let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
+
+            var settled = false
+            let lock = NSLock()
+            func settle(_ value: Bool) {
+                lock.lock()
+                let already = settled
+                settled = true
+                lock.unlock()
+                guard !already else { return }
+                connection.cancel()
+                continuation.resume(returning: value)
+            }
+
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    settle(true)
+                case .failed, .cancelled:
+                    settle(false)
+                default:
+                    break
+                }
+            }
+            connection.start(queue: queue)
+            queue.asyncAfter(deadline: .now() + timeout) { settle(false) }
+        }
     }
 }
 

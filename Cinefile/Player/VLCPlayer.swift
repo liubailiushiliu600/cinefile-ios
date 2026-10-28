@@ -37,10 +37,16 @@ final class VLCPlayer: NSObject, ObservableObject {
 
     // MARK: - Transport
 
-    func open(_ url: URL) {
+    /// - Parameter startAt: seconds to jump to while opening (resume playback).
+    ///   Applied as `:start-time` on the media so VLC seeks during demux instead
+    ///   of decoding the opening seconds first.
+    func open(_ url: URL, startAt: Double = 0) {
         errorText = nil
         isEnded = false
         let media = VLCMedia(url: url)
+        if startAt >= 1 {
+            media.addOption(":start-time=\(String(format: "%.2f", startAt))")
+        }
         player.media = media
         player.play()
         player.audio?.volume = volume
@@ -61,11 +67,20 @@ final class VLCPlayer: NSObject, ObservableObject {
     }
 
     func skip(_ seconds: Double) {
-        let target = max(0, currentTime + seconds)
+        seek(to: currentTime + seconds)
+    }
+
+    /// Absolute seek — used by buttons and by the horizontal drag gesture.
+    func seek(to seconds: Double) {
+        guard seconds.isFinite else { return }
+        var target = max(0, seconds)
         if duration > 0 {
-            player.time = VLCTime(int: Int32(min(target, duration) * 1000))
-        } else {
-            player.time = VLCTime(int: Int32(target * 1000))
+            target = min(target, max(duration - 1, 0))
+        }
+        player.time = VLCTime(int: Int32(target * 1000))
+        currentTime = target
+        if duration > 0 {
+            position = Float(target / duration)
         }
     }
 

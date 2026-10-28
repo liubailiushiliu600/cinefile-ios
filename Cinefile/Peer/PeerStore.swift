@@ -93,6 +93,52 @@ final class PeerStore {
         return access
     }
 
+    /// Credentials for a paired peer, re-pointed at the IPv4 address we last
+    /// reached it on. The desktop hands over its NetBIOS name (DESKTOP-XXXX),
+    /// which iOS cannot resolve through getaddrinfo.
+    func access(for peer: PairedPeer) -> SMBAccess? {
+        guard var access = access(for: peer.instanceId) else { return nil }
+        if Self.isIPv4(peer.lastAddress) {
+            access.server = peer.lastAddress
+        }
+        return access
+    }
+
+    static func isIPv4(_ value: String) -> Bool {
+        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        return parts.allSatisfy { part in
+            guard let number = Int(part) else { return false }
+            return (0...255).contains(number)
+        }
+    }
+
+    // MARK: - Launch state
+
+    private enum Key {
+        static let peer = "cinefile.lastNetworkPeer"
+        static let folder = "cinefile.lastNetworkFolder"
+        static let preferNetwork = "cinefile.launchIntoNetwork"
+    }
+
+    /// Which network library was open last time (nil = never used one).
+    var lastNetworkPeerId: String? {
+        get { UserDefaults.standard.string(forKey: Key.peer) }
+        set { UserDefaults.standard.set(newValue, forKey: Key.peer) }
+    }
+
+    /// Folder inside that library, so the app reopens where the user left off.
+    var lastNetworkFolder: String {
+        get { UserDefaults.standard.string(forKey: Key.folder) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: Key.folder) }
+    }
+
+    /// True when the last thing the user browsed was a peer's share.
+    var preferNetworkOnLaunch: Bool {
+        get { UserDefaults.standard.bool(forKey: Key.preferNetwork) }
+        set { UserDefaults.standard.set(newValue, forKey: Key.preferNetwork) }
+    }
+
     private func keychainDelete(account: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

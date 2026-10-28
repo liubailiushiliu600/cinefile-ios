@@ -29,6 +29,7 @@ final class AppState: ObservableObject {
     @Published var remotePath = ""
 
     private let store = LibraryStore()
+    private let peerStore = PeerStore()
     private var scopedURL: URL?
     private var rootURL: URL?
     private var currentLocalURL: URL?
@@ -41,12 +42,45 @@ final class AppState: ObservableObject {
         libraries = store.load()
     }
 
-    /// Reopen the most recent local library once, on first appearance.
+    /// Reopen where the user left off: the paired peer's share when that was
+    /// the last library, otherwise the most recent local folder.
     func restoreLastIfNeeded() {
         guard !didRestore else { return }
         didRestore = true
-        guard currentSource == nil, let first = libraries.first else { return }
-        open(first)
+        guard currentSource == nil else { return }
+
+        if peerStore.preferNetworkOnLaunch,
+           let id = peerStore.lastNetworkPeerId,
+           let peer = peerStore.load().first(where: { $0.instanceId == id }),
+           let access = peerStore.access(for: peer) {
+            Task { await restoreNetwork(peer: peer, access: access) }
+            return
+        }
+
+        if let first = libraries.first {
+            open(first)
+        }
+    }
+
+    /// Reconnect to the last network library without any user action. A PC that
+    /// is powered off simply falls back to the local library — no error dialog.
+    private func restoreNetwork(peer: PairedPeer, access: SMBAccess) async {
+        guard await SMBClient.isReachable(host: access.server) else {
+            if let first = libraries.first { open(first) }
+            return
+        }
+
+        await openNetwork(peer: peer, access: access)
+
+        guard currentSource != nil else {
+            if let first = libraries.first { open(first) }
+            return
+        }
+
+        let folder = peerStore.lastNetworkFolder
+        if !folder.isEmpty {
+            navigateRemote(folder)
+        }
     }
 
     // MARK: - Derived
@@ -152,6 +186,7 @@ final class AppState: ObservableObject {
         rootURL = url
         currentSource = .local(ref)
         libraries = store.touch(ref)
+        peerStore.preferNetworkOnLaunch = false
 
         let restored = URL(fileURLWithPath: ref.lastPath)
         var isDirectory: ObjCBool = false
@@ -180,6 +215,7 @@ final class AppState: ObservableObject {
         )
         currentSource = .local(ref)
         libraries = store.load()
+        peerStore.preferNetworkOnLaunch = false
         navigateLocal(url)
     }
 
@@ -205,11 +241,15 @@ final class AppState: ObservableObject {
             smbClient = client
             smbAccess = access
             currentSource = .network(peer)
+            peerStore.lastNetworkPeerId = peer.instanceId
+            peerStore.lastNetworkFolder = ""
+            peerStore.preferNetworkOnLaunch = true
 
             let items = try await client.list("")
             entries = items
                 .map(Self.remoteEntry)
                 .filter { $0.isDirectory || DirectoryLister.isVideo($0.name) }
+            prefetchThumbnails()
         } catch {
             errorMessage = "连接 \(access.server) 失败：\(error.localizedDescription)"
             currentSource = nil
@@ -269,12 +309,23 @@ final class AppState: ObservableObject {
                     .map(Self.remoteEntry)
                     .filter { $0.isDirectory || DirectoryLister.isVideo($0.name) }
                 remotePath = path
+                peerStore.lastNetworkFolder = path
+                prefetchThumbnails()
             } catch {
                 entries = []
                 errorMessage = "读取目录失败：\(error.localizedDescription)"
             }
             isLoading = false
         }
+    }
+
+    /// Pull the rest of the folder's thumbnails in the background, so scrolling
+    /// and coming back later is instant. Visible cards always jump the queue.
+    private func prefetchThumbnails() {
+        guard let access = smbAccess else { return }
+        let videos = entries.filter { !$0.isDirectory }
+        guard !videos.isEmpty else { return }
+        RemoteThumbnailService.shared.prefetch(videos, access: access)
     }
 
     func reload() {
@@ -338,14 +389,22 @@ final class AppState: ObservableObject {
 
         switch entry.location {
         case .local(let url):
-            playingRequest = PlayRequest(url: url, title: entry.name)
+            playingRequest = PlayRequest(
+                url: url,
+                title: entry.name,
+                progressKey: PlaybackProgressStore.key(for: entry)
+            )
 
         case .remote(let path):
             guard let access = smbAccess, let url = access.playbackURL(relativePath: path) else {
                 errorMessage = "无法为这个文件生成播放地址。"
                 return
             }
-            playingRequest = PlayRequest(url: url, title: entry.name)
+            playingRequest = PlayRequest(
+                url: url,
+                title: entry.name,
+                progressKey: PlaybackProgressStore.key(for: entry)
+            )
         }
     }
 
@@ -361,6 +420,7 @@ final class AppState: ObservableObject {
         entries = []
         searchText = ""
         errorMessage = nil
+        peerStore.preferNetworkOnLaunch = false
     }
 
     func forget(_ ref: LibraryRef) {

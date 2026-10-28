@@ -9,6 +9,7 @@ struct VideoCard: View {
     @EnvironmentObject private var app: AppState
     @State private var image: UIImage?
     @State private var failed = false
+    @State private var watch: WatchState?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -18,7 +19,9 @@ struct VideoCard: View {
         .background(CF.bg2)
         .clipShape(RoundedRectangle(cornerRadius: CF.radius))
         .contentShape(RoundedRectangle(cornerRadius: CF.radius))
+        .onAppear { refreshWatchState() }
         .task(id: entry.id) {
+            refreshWatchState()
             guard !entry.isDirectory else { return }
 
             if entry.isRemote {
@@ -34,6 +37,13 @@ struct VideoCard: View {
                 failed = true
             }
         }
+    }
+
+    /// Progress memory is written by the player, so it has to be re-read every
+    /// time the grid comes back on screen (returning from playback).
+    private func refreshWatchState() {
+        guard !entry.isDirectory else { return }
+        watch = PlaybackProgressStore.shared.state(for: entry)
     }
 
     private var thumbnail: some View {
@@ -99,6 +109,20 @@ struct VideoCard: View {
                 .padding(8)
             }
         }
+        .overlay(alignment: .bottomLeading) {
+            if let watch, watch.fraction > 0.01, watch.fraction < 0.99 {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.black.opacity(0.55))
+                        Rectangle()
+                            .fill(CF.accent)
+                            .frame(width: proxy.size.width * watch.fraction)
+                    }
+                }
+                .frame(height: 3)
+            }
+        }
     }
 
     private var info: some View {
@@ -122,7 +146,11 @@ struct VideoCard: View {
                 }
                 Spacer(minLength: 0)
                 if !entry.isDirectory {
-                    CFBadge(text: "未看", color: CF.stateUnwatched)
+                    if let watch {
+                        CFBadge(text: watch.label, color: watch.color)
+                    } else {
+                        CFBadge(text: "未看", color: CF.stateUnwatched)
+                    }
                 }
             }
         }

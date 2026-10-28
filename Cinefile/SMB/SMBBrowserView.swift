@@ -4,6 +4,8 @@ struct PlayRequest: Identifiable {
     let id = UUID()
     let url: URL
     let title: String
+    /// Identity used to remember the playback position (empty = do not remember).
+    var progressKey: String = ""
 }
 
 /// Browse a paired peer's SMB share and play its videos through VLC's
